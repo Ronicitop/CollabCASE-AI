@@ -1,6 +1,7 @@
 package com.collabcase.modelado.controlador;
 
 import com.collabcase.modelado.dominio.ModeloDiagrama;
+import com.collabcase.modelado.dto.ModeloCompletoResponse;
 import com.collabcase.modelado.servicio.ModeloDiagramaService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,5 +45,12 @@ public class ModeloDiagramaController {
             @PathVariable UUID proyectoId) {
 
         return modeloDiagramaService.buscarPorProyecto(proyectoId);
+    }
+
+    @GetMapping("/proyecto/{proyectoId}/completo")
+    public ModeloCompletoResponse obtenerModeloCompleto(
+            @PathVariable UUID proyectoId) {
+
+        return modeloDiagramaService.obtenerModeloCompleto(proyectoId);
     }
 }
