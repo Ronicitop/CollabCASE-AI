@@ -1,0 +1,24 @@
+# Maven / Java
+**/target/
+
+# Variables y secretos
+.env
+*.env
+
+# VS Code
+.vscode/
+
+# IntelliJ / Eclipse
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# Frontend futuro
+**/node_modules/
+**/dist/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
