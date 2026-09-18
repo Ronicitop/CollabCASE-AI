@@ -70,6 +70,18 @@ type SesionColaborativa = {
 
 type EstadoConexion = 'desconectado' | 'conectando' | 'conectado'
 
+const ordenarAtributosParaMostrar = (
+  atributos: AtributoDiagrama[],
+): AtributoDiagrama[] => {
+  return [...atributos].sort((a, b) => {
+    if (a.identificador === b.identificador) {
+      return 0
+    }
+
+    return a.identificador ? -1 : 1
+  })
+}
+
 type OperacionColaborativaResponse = {
   operacionId: string
   clienteId: string
@@ -94,7 +106,7 @@ const construirNodos = (modelo: ModeloCompleto): Node[] => {
             {clase.atributos.length === 0 ? (
               <span>Sin atributos</span>
             ) : (
-              clase.atributos.map((atributo) => (
+              ordenarAtributosParaMostrar(clase.atributos).map((atributo) => (
                 <div key={atributo.id}>
                   {atributo.identificador ? '🔑 ' : ''}
                   {atributo.nombre}: {atributo.tipoDato}
@@ -1073,6 +1085,46 @@ function App() {
       setErrorAtributo('')
       setErrorGuardado('')
 
+      if (sesionColaborativa) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de guardar un atributo.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo:
+              atributoEditandoId === null
+                ? 'CREAR_ATRIBUTO'
+                : 'ACTUALIZAR_ATRIBUTO',
+            datos: {
+              ...(atributoEditandoId !== null
+                ? { atributoId: atributoEditandoId }
+                : {}),
+              claseId: claseSeleccionadaId,
+              nombre: nombreLimpio,
+              tipoDato: tipoDatoLimpio,
+              permiteNulo: permiteNuloAtributo,
+              identificador: identificadorAtributo,
+            },
+          }),
+        })
+
+        setNombreAtributo('')
+        setTipoDatoAtributo('')
+        setPermiteNuloAtributo(false)
+        setIdentificadorAtributo(false)
+        setAtributoEditandoId(null)
+        setMostrarFormularioAtributo(false)
+        return
+      }
+
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
       )
@@ -1201,6 +1253,40 @@ function App() {
       setEliminandoAtributoId(atributo.id)
       setErrorAtributo('')
       setErrorGuardado('')
+
+      if (sesionColaborativa) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de eliminar un atributo.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo: 'ELIMINAR_ATRIBUTO',
+            datos: {
+              atributoId: atributo.id,
+              claseId: claseSeleccionadaId,
+            },
+          }),
+        })
+
+        if (atributoEditandoId === atributo.id) {
+          setNombreAtributo('')
+          setTipoDatoAtributo('')
+          setPermiteNuloAtributo(false)
+          setIdentificadorAtributo(false)
+          setAtributoEditandoId(null)
+          setMostrarFormularioAtributo(false)
+        }
+
+        return
+      }
 
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
@@ -2054,7 +2140,9 @@ function App() {
 
                   {claseSeleccionada.atributos.length > 0 && (
                     <div className="lista-atributos-panel">
-                      {claseSeleccionada.atributos.map((atributo) => (
+                      {ordenarAtributosParaMostrar(
+                        claseSeleccionada.atributos,
+                      ).map((atributo) => (
                         <div className="fila-atributo" key={atributo.id}>
                           <div className="info-atributo">
                             <strong>{atributo.nombre}</strong>

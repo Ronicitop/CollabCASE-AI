@@ -3,7 +3,7 @@ package com.collabcase.colaboracion.servicio;
 import com.collabcase.colaboracion.dto.OperacionColaborativaRequest;
 import com.collabcase.colaboracion.dto.OperacionColaborativaResponse;
 import com.collabcase.colaboracion.dto.SesionColaborativaResponse;
-import com.collabcase.colaboracion.dto.TipoOperacionColaborativa;
+import com.collabcase.modelado.dominio.AtributoDiagrama;
 import com.collabcase.modelado.dominio.ClaseDiagrama;
 import com.collabcase.modelado.dominio.ModeloDiagrama;
 import com.collabcase.modelado.dto.ModeloCompletoResponse;
@@ -57,6 +57,15 @@ public class OperacionColaborativaService {
             case ELIMINAR_CLASE ->
                     eliminarClase(sesion, solicitud);
 
+            case CREAR_ATRIBUTO ->
+                    crearAtributo(sesion, solicitud);
+
+            case ACTUALIZAR_ATRIBUTO ->
+                    actualizarAtributo(sesion, solicitud);
+
+            case ELIMINAR_ATRIBUTO ->
+                    eliminarAtributo(sesion, solicitud);
+
             default ->
                     throw new IllegalStateException(
                             "La operación colaborativa todavía no está implementada: "
@@ -73,7 +82,7 @@ public class OperacionColaborativaService {
         JsonNode datos = solicitud.datos();
 
         UUID claseId = UUID.fromString(
-                datos.get("claseId").asText()
+                datos.get("claseId").asString()
         );
 
         double posicionX = datos.get("posicionX").asDouble();
@@ -88,20 +97,12 @@ public class OperacionColaborativaService {
                     OperacionColaborativaResponse respuesta =
                             transactionTemplate.execute(status -> {
 
-                                ClaseDiagrama clase = claseDiagramaRepository
-                                        .findById(claseId)
-                                        .orElseThrow(() ->
-                                                new IllegalArgumentException(
-                                                        "Clase UML no encontrada"
-                                                )
-                                        );
-
-                                ModeloDiagrama modelo = clase.getModelo();
-
-                                validarProyectoSesion(
-                                        modelo,
+                                ClaseDiagrama clase = obtenerClaseDeSesion(
+                                        claseId,
                                         sesion
                                 );
+
+                                ModeloDiagrama modelo = clase.getModelo();
 
                                 int filasClase =
                                         claseDiagramaRepository.actualizarPosicion(
@@ -119,14 +120,9 @@ public class OperacionColaborativaService {
 
                                 incrementarVersionModelo(modelo.getId());
 
-                                ModeloCompletoResponse modeloActualizado =
-                                        modeloDiagramaService.obtenerModeloCompleto(
-                                                sesion.proyectoId()
-                                        );
-
-                                return construirRespuesta(
-                                        solicitud,
-                                        modeloActualizado
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
                                 );
                             });
 
@@ -142,19 +138,13 @@ public class OperacionColaborativaService {
 
         JsonNode datos = solicitud.datos();
 
-        String nombre = datos.get("nombre").asText().trim();
+        String nombre = datos.get("nombre").asString().trim();
         double posicionX = datos.get("posicionX").asDouble();
         double posicionY = datos.get("posicionY").asDouble();
 
         validarNombreClase(nombre);
 
-        ModeloDiagrama modelo = modeloDiagramaRepository
-                .findByProyectoId(sesion.proyectoId())
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Modelo UML no encontrado"
-                        )
-                );
+        ModeloDiagrama modelo = obtenerModeloDeSesion(sesion);
 
         String nombreNormalizado =
                 nombre.toLowerCase(Locale.ROOT);
@@ -198,14 +188,9 @@ public class OperacionColaborativaService {
 
                                 incrementarVersionModelo(modelo.getId());
 
-                                ModeloCompletoResponse modeloActualizado =
-                                        modeloDiagramaService.obtenerModeloCompleto(
-                                                sesion.proyectoId()
-                                        );
-
-                                return construirRespuesta(
-                                        solicitud,
-                                        modeloActualizado
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
                                 );
                             });
 
@@ -222,10 +207,10 @@ public class OperacionColaborativaService {
         JsonNode datos = solicitud.datos();
 
         UUID claseId = UUID.fromString(
-                datos.get("claseId").asText()
+                datos.get("claseId").asString()
         );
 
-        String nombre = datos.get("nombre").asText().trim();
+        String nombre = datos.get("nombre").asString().trim();
 
         validarNombreClase(nombre);
 
@@ -238,20 +223,12 @@ public class OperacionColaborativaService {
                     OperacionColaborativaResponse respuesta =
                             transactionTemplate.execute(status -> {
 
-                                ClaseDiagrama clase = claseDiagramaRepository
-                                        .findById(claseId)
-                                        .orElseThrow(() ->
-                                                new IllegalArgumentException(
-                                                        "Clase UML no encontrada"
-                                                )
-                                        );
-
-                                ModeloDiagrama modelo = clase.getModelo();
-
-                                validarProyectoSesion(
-                                        modelo,
+                                ClaseDiagrama clase = obtenerClaseDeSesion(
+                                        claseId,
                                         sesion
                                 );
+
+                                ModeloDiagrama modelo = clase.getModelo();
 
                                 boolean nombreDuplicado =
                                         claseDiagramaRepository
@@ -282,14 +259,9 @@ public class OperacionColaborativaService {
 
                                 incrementarVersionModelo(modelo.getId());
 
-                                ModeloCompletoResponse modeloActualizado =
-                                        modeloDiagramaService.obtenerModeloCompleto(
-                                                sesion.proyectoId()
-                                        );
-
-                                return construirRespuesta(
-                                        solicitud,
-                                        modeloActualizado
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
                                 );
                             });
 
@@ -306,7 +278,7 @@ public class OperacionColaborativaService {
         JsonNode datos = solicitud.datos();
 
         UUID claseId = UUID.fromString(
-                datos.get("claseId").asText()
+                datos.get("claseId").asString()
         );
 
         List<String> clavesBloqueo = List.of(
@@ -321,20 +293,12 @@ public class OperacionColaborativaService {
                     OperacionColaborativaResponse respuesta =
                             transactionTemplate.execute(status -> {
 
-                                ClaseDiagrama clase = claseDiagramaRepository
-                                        .findById(claseId)
-                                        .orElseThrow(() ->
-                                                new IllegalArgumentException(
-                                                        "Clase UML no encontrada"
-                                                )
-                                        );
-
-                                ModeloDiagrama modelo = clase.getModelo();
-
-                                validarProyectoSesion(
-                                        modelo,
+                                ClaseDiagrama clase = obtenerClaseDeSesion(
+                                        claseId,
                                         sesion
                                 );
+
+                                ModeloDiagrama modelo = clase.getModelo();
 
                                 relacionDiagramaRepository.eliminarPorClaseId(
                                         claseId
@@ -358,20 +322,298 @@ public class OperacionColaborativaService {
 
                                 incrementarVersionModelo(modelo.getId());
 
-                                ModeloCompletoResponse modeloActualizado =
-                                        modeloDiagramaService.obtenerModeloCompleto(
-                                                sesion.proyectoId()
-                                        );
-
-                                return construirRespuesta(
-                                        solicitud,
-                                        modeloActualizado
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
                                 );
                             });
 
                     return validarRespuestaTransaccion(respuesta);
                 }
         );
+    }
+
+    private OperacionColaborativaResponse crearAtributo(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID claseId = UUID.fromString(
+                datos.get("claseId").asString()
+        );
+
+        String nombre = datos.get("nombre").asString().trim();
+        String tipoDato = datos.get("tipoDato").asString().trim();
+        boolean permiteNulo = datos.get("permiteNulo").asBoolean();
+        boolean identificador = datos.get("identificador").asBoolean();
+
+        validarAtributo(nombre, tipoDato);
+
+        String claveBloqueo =
+                "CLASE:"
+                        + claseId
+                        + ":NOMBRE_ATRIBUTO:"
+                        + nombre.toLowerCase(Locale.ROOT);
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueo(
+                claveBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                ClaseDiagrama clase = obtenerClaseDeSesion(
+                                        claseId,
+                                        sesion
+                                );
+
+                                boolean nombreDuplicado =
+                                        atributoDiagramaRepository
+                                                .existsByClaseIdAndNombreIgnoreCase(
+                                                        claseId,
+                                                        nombre
+                                                );
+
+                                if (nombreDuplicado) {
+                                    throw new IllegalStateException(
+                                            "Ya existe un atributo con ese nombre en la clase"
+                                    );
+                                }
+
+                                AtributoDiagrama nuevoAtributo =
+                                        AtributoDiagrama.builder()
+                                                .clase(clase)
+                                                .nombre(nombre)
+                                                .tipoDato(tipoDato)
+                                                .permiteNulo(permiteNulo)
+                                                .identificador(identificador)
+                                                .build();
+
+                                atributoDiagramaRepository.saveAndFlush(
+                                        nuevoAtributo
+                                );
+
+                                incrementarVersionModelo(
+                                        clase.getModelo().getId()
+                                );
+
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private OperacionColaborativaResponse actualizarAtributo(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID atributoId = UUID.fromString(
+                datos.get("atributoId").asString()
+        );
+
+        UUID claseId = UUID.fromString(
+                datos.get("claseId").asString()
+        );
+
+        String nombre = datos.get("nombre").asString().trim();
+        String tipoDato = datos.get("tipoDato").asString().trim();
+        boolean permiteNulo = datos.get("permiteNulo").asBoolean();
+        boolean identificador = datos.get("identificador").asBoolean();
+
+        validarAtributo(nombre, tipoDato);
+
+        String claveBloqueo =
+                "ATRIBUTO:" + atributoId;
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueo(
+                claveBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                ClaseDiagrama clase = obtenerClaseDeSesion(
+                                        claseId,
+                                        sesion
+                                );
+
+                                AtributoDiagrama atributo =
+                                        atributoDiagramaRepository
+                                                .findById(atributoId)
+                                                .orElseThrow(() ->
+                                                        new IllegalArgumentException(
+                                                                "Atributo UML no encontrado"
+                                                        )
+                                                );
+
+                                if (!atributo.getClase()
+                                        .getId()
+                                        .equals(claseId)) {
+
+                                    throw new IllegalStateException(
+                                            "El atributo no pertenece a la clase indicada"
+                                    );
+                                }
+
+                                boolean nombreDuplicado =
+                                        atributoDiagramaRepository
+                                                .existsByClaseIdAndNombreIgnoreCaseAndIdNot(
+                                                        claseId,
+                                                        nombre,
+                                                        atributoId
+                                                );
+
+                                if (nombreDuplicado) {
+                                    throw new IllegalStateException(
+                                            "Ya existe un atributo con ese nombre en la clase"
+                                    );
+                                }
+
+                                int filasAtributo =
+                                        atributoDiagramaRepository.actualizarAtributo(
+                                                atributoId,
+                                                claseId,
+                                                nombre,
+                                                tipoDato,
+                                                permiteNulo,
+                                                identificador
+                                        );
+
+                                if (filasAtributo != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo actualizar el atributo UML"
+                                    );
+                                }
+
+                                incrementarVersionModelo(
+                                        clase.getModelo().getId()
+                                );
+
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private OperacionColaborativaResponse eliminarAtributo(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID atributoId = UUID.fromString(
+                datos.get("atributoId").asString()
+        );
+
+        UUID claseId = UUID.fromString(
+                datos.get("claseId").asString()
+        );
+
+        String claveBloqueo =
+                "ATRIBUTO:" + atributoId;
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueo(
+                claveBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                ClaseDiagrama clase = obtenerClaseDeSesion(
+                                        claseId,
+                                        sesion
+                                );
+
+                                AtributoDiagrama atributo =
+                                        atributoDiagramaRepository
+                                                .findById(atributoId)
+                                                .orElseThrow(() ->
+                                                        new IllegalArgumentException(
+                                                                "Atributo UML no encontrado"
+                                                        )
+                                                );
+
+                                if (!atributo.getClase()
+                                        .getId()
+                                        .equals(claseId)) {
+
+                                    throw new IllegalStateException(
+                                            "El atributo no pertenece a la clase indicada"
+                                    );
+                                }
+
+                                int filasAtributo =
+                                        atributoDiagramaRepository.eliminarPorIdYClaseId(
+                                                atributoId,
+                                                claseId
+                                        );
+
+                                if (filasAtributo != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo eliminar el atributo UML"
+                                    );
+                                }
+
+                                incrementarVersionModelo(
+                                        clase.getModelo().getId()
+                                );
+
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private ModeloDiagrama obtenerModeloDeSesion(
+            SesionColaborativaResponse sesion
+    ) {
+
+        return modeloDiagramaRepository
+                .findByProyectoId(sesion.proyectoId())
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Modelo UML no encontrado"
+                        )
+                );
+    }
+
+    private ClaseDiagrama obtenerClaseDeSesion(
+            UUID claseId,
+            SesionColaborativaResponse sesion
+    ) {
+
+        ClaseDiagrama clase = claseDiagramaRepository
+                .findById(claseId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Clase UML no encontrada"
+                        )
+                );
+
+        validarProyectoSesion(
+                clase.getModelo(),
+                sesion
+        );
+
+        return clase;
     }
 
     private void validarNombreClase(String nombre) {
@@ -389,6 +631,36 @@ public class OperacionColaborativaService {
         }
     }
 
+    private void validarAtributo(
+            String nombre,
+            String tipoDato
+    ) {
+
+        if (nombre.isBlank()) {
+            throw new IllegalStateException(
+                    "El nombre del atributo es obligatorio"
+            );
+        }
+
+        if (nombre.length() > 100) {
+            throw new IllegalStateException(
+                    "El nombre del atributo no puede superar 100 caracteres"
+            );
+        }
+
+        if (tipoDato.isBlank()) {
+            throw new IllegalStateException(
+                    "El tipo de dato del atributo es obligatorio"
+            );
+        }
+
+        if (tipoDato.length() > 50) {
+            throw new IllegalStateException(
+                    "El tipo de dato no puede superar 50 caracteres"
+            );
+        }
+    }
+
     private void validarProyectoSesion(
             ModeloDiagrama modelo,
             SesionColaborativaResponse sesion
@@ -399,7 +671,7 @@ public class OperacionColaborativaService {
                 .equals(sesion.proyectoId())) {
 
             throw new IllegalStateException(
-                    "La clase no pertenece al proyecto de la sesión"
+                    "El elemento no pertenece al proyecto de la sesión"
             );
         }
     }
@@ -418,10 +690,15 @@ public class OperacionColaborativaService {
         }
     }
 
-    private OperacionColaborativaResponse construirRespuesta(
-            OperacionColaborativaRequest solicitud,
-            ModeloCompletoResponse modeloActualizado
+    private OperacionColaborativaResponse construirRespuestaActualizada(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
     ) {
+
+        ModeloCompletoResponse modeloActualizado =
+                modeloDiagramaService.obtenerModeloCompleto(
+                        sesion.proyectoId()
+                );
 
         return new OperacionColaborativaResponse(
                 solicitud.operacionId(),

@@ -19,6 +19,47 @@ public interface AtributoDiagramaRepository extends JpaRepository<AtributoDiagra
             String nombre
     );
 
+    boolean existsByClaseIdAndNombreIgnoreCase(
+            UUID claseId,
+            String nombre
+    );
+
+    boolean existsByClaseIdAndNombreIgnoreCaseAndIdNot(
+            UUID claseId,
+            String nombre,
+            UUID id
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update AtributoDiagrama a
+               set a.nombre = :nombre,
+                   a.tipoDato = :tipoDato,
+                   a.permiteNulo = :permiteNulo,
+                   a.identificador = :identificador
+             where a.id = :atributoId
+               and a.clase.id = :claseId
+            """)
+    int actualizarAtributo(
+            @Param("atributoId") UUID atributoId,
+            @Param("claseId") UUID claseId,
+            @Param("nombre") String nombre,
+            @Param("tipoDato") String tipoDato,
+            @Param("permiteNulo") boolean permiteNulo,
+            @Param("identificador") boolean identificador
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            delete from AtributoDiagrama a
+             where a.id = :atributoId
+               and a.clase.id = :claseId
+            """)
+    int eliminarPorIdYClaseId(
+            @Param("atributoId") UUID atributoId,
+            @Param("claseId") UUID claseId
+    );
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             delete from AtributoDiagrama a
@@ -28,3 +69,4 @@ public interface AtributoDiagramaRepository extends JpaRepository<AtributoDiagra
             @Param("claseId") UUID claseId
     );
 }
+
