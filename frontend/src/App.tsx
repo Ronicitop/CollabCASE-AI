@@ -129,6 +129,18 @@ function App() {
   const [claseEditandoId, setClaseEditandoId] = useState<string | null>(null)
   const [eliminandoClaseId, setEliminandoClaseId] = useState<string | null>(null)
 
+  const [mostrarFormularioRelacion, setMostrarFormularioRelacion] = useState(false)
+  const [claseOrigenRelacion, setClaseOrigenRelacion] = useState('')
+  const [claseDestinoRelacion, setClaseDestinoRelacion] = useState('')
+  const [tipoRelacion, setTipoRelacion] = useState('ASOCIACION')
+  const [multiplicidadOrigenRelacion, setMultiplicidadOrigenRelacion] = useState('1')
+  const [multiplicidadDestinoRelacion, setMultiplicidadDestinoRelacion] = useState('*')
+  const [nombreRelacion, setNombreRelacion] = useState('')
+  const [creandoRelacion, setCreandoRelacion] = useState(false)
+  const [errorRelacion, setErrorRelacion] = useState('')
+  const [relacionEditandoId, setRelacionEditandoId] = useState<string | null>(null)
+  const [eliminandoRelacionId, setEliminandoRelacionId] = useState<string | null>(null)
+
   const [claseSeleccionadaId, setClaseSeleccionadaId] = useState<string | null>(null)
   const [mostrarFormularioAtributo, setMostrarFormularioAtributo] = useState(false)
   const [nombreAtributo, setNombreAtributo] = useState('')
@@ -953,11 +965,316 @@ function App() {
     setMostrarFormularioAtributo(false)
   }
 
+  const guardarRelacion = async (evento: FormEvent<HTMLFormElement>) => {
+    evento.preventDefault()
+
+    if (!proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    if (!claseOrigenRelacion) {
+      setErrorRelacion('Debes seleccionar una clase de origen.')
+      return
+    }
+
+    if (!claseDestinoRelacion) {
+      setErrorRelacion('Debes seleccionar una clase de destino.')
+      return
+    }
+
+    const tipoLimpio = tipoRelacion.trim()
+
+    if (!tipoLimpio) {
+      setErrorRelacion('El tipo de relación es obligatorio.')
+      return
+    }
+
+    try {
+      setCreandoRelacion(true)
+      setErrorRelacion('')
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      const relacionesExistentes = modeloAbierto.relaciones.map((relacion) => {
+        if (relacion.id === relacionEditandoId) {
+          return {
+            id: relacion.id,
+            claseOrigenClave: relacion.claseOrigenId,
+            claseDestinoClave: relacion.claseDestinoId,
+            tipo: tipoLimpio,
+            multiplicidadOrigen: multiplicidadOrigenRelacion.trim() || null,
+            multiplicidadDestino: multiplicidadDestinoRelacion.trim() || null,
+            nombre: nombreRelacion.trim() || null,
+          }
+        }
+
+        return {
+          id: relacion.id,
+          claseOrigenClave: relacion.claseOrigenId,
+          claseDestinoClave: relacion.claseDestinoId,
+          tipo: relacion.tipo,
+          multiplicidadOrigen: relacion.multiplicidadOrigen,
+          multiplicidadDestino: relacion.multiplicidadDestino,
+          nombre: relacion.nombre,
+        }
+      })
+
+      const solicitud = {
+        clases: modeloAbierto.clases.map((clase) => {
+          const posicion = posicionesPorId.get(clase.id) ?? {
+            x: clase.posicionX,
+            y: clase.posicionY,
+          }
+
+          return {
+            id: clase.id,
+            claveCliente: clase.id,
+            nombre: clase.nombre,
+            posicionX: posicion.x,
+            posicionY: posicion.y,
+            atributos: clase.atributos.map((atributo) => ({
+              id: atributo.id,
+              nombre: atributo.nombre,
+              tipoDato: atributo.tipoDato,
+              permiteNulo: atributo.permiteNulo,
+              identificador: atributo.identificador,
+            })),
+          }
+        }),
+
+        relaciones:
+          relacionEditandoId === null
+            ? [
+                ...relacionesExistentes,
+                {
+                  id: null,
+                  claseOrigenClave: claseOrigenRelacion,
+                  claseDestinoClave: claseDestinoRelacion,
+                  tipo: tipoLimpio,
+                  multiplicidadOrigen:
+                    multiplicidadOrigenRelacion.trim() || null,
+                  multiplicidadDestino:
+                    multiplicidadDestinoRelacion.trim() || null,
+                  nombre: nombreRelacion.trim() || null,
+                },
+              ]
+            : relacionesExistentes,
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje =
+          relacionEditandoId === null
+            ? 'No se pudo crear la relación UML'
+            : 'No se pudo actualizar la relación UML'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general si la respuesta no contiene JSON.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+      setRelacionEditandoId(null)
+      setClaseOrigenRelacion('')
+      setClaseDestinoRelacion('')
+      setTipoRelacion('ASOCIACION')
+      setMultiplicidadOrigenRelacion('1')
+      setMultiplicidadDestinoRelacion('*')
+      setNombreRelacion('')
+      setMostrarFormularioRelacion(false)
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorRelacion(error.message)
+      } else {
+        setErrorRelacion('Ocurrió un error al guardar la relación UML')
+      }
+    } finally {
+      setCreandoRelacion(false)
+    }
+  }
+
+  const editarRelacion = (relacion: RelacionDiagrama) => {
+    setRelacionEditandoId(relacion.id)
+    setClaseOrigenRelacion(relacion.claseOrigenId)
+    setClaseDestinoRelacion(relacion.claseDestinoId)
+    setTipoRelacion(relacion.tipo)
+    setMultiplicidadOrigenRelacion(relacion.multiplicidadOrigen ?? '')
+    setMultiplicidadDestinoRelacion(relacion.multiplicidadDestino ?? '')
+    setNombreRelacion(relacion.nombre ?? '')
+    setErrorRelacion('')
+    setMostrarFormularioRelacion(true)
+  }
+
+  const eliminarRelacion = async (relacion: RelacionDiagrama) => {
+    if (!proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    const claseOrigen = modeloAbierto.clases.find(
+      (clase) => clase.id === relacion.claseOrigenId,
+    )
+    const claseDestino = modeloAbierto.clases.find(
+      (clase) => clase.id === relacion.claseDestinoId,
+    )
+
+    const descripcionRelacion =
+      relacion.nombre?.trim() ||
+      `${claseOrigen?.nombre ?? 'Origen'} → ${claseDestino?.nombre ?? 'Destino'}`
+
+    const confirmar = window.confirm(
+      `¿Eliminar la relación "${descripcionRelacion}"? Las clases conectadas se conservarán.`,
+    )
+
+    if (!confirmar) {
+      return
+    }
+
+    try {
+      setEliminandoRelacionId(relacion.id)
+      setErrorRelacion('')
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      const solicitud = {
+        clases: modeloAbierto.clases.map((clase) => {
+          const posicion = posicionesPorId.get(clase.id) ?? {
+            x: clase.posicionX,
+            y: clase.posicionY,
+          }
+
+          return {
+            id: clase.id,
+            claveCliente: clase.id,
+            nombre: clase.nombre,
+            posicionX: posicion.x,
+            posicionY: posicion.y,
+            atributos: clase.atributos.map((atributo) => ({
+              id: atributo.id,
+              nombre: atributo.nombre,
+              tipoDato: atributo.tipoDato,
+              permiteNulo: atributo.permiteNulo,
+              identificador: atributo.identificador,
+            })),
+          }
+        }),
+
+        relaciones: modeloAbierto.relaciones
+          .filter((relacionActual) => relacionActual.id !== relacion.id)
+          .map((relacionActual) => ({
+            id: relacionActual.id,
+            claseOrigenClave: relacionActual.claseOrigenId,
+            claseDestinoClave: relacionActual.claseDestinoId,
+            tipo: relacionActual.tipo,
+            multiplicidadOrigen: relacionActual.multiplicidadOrigen,
+            multiplicidadDestino: relacionActual.multiplicidadDestino,
+            nombre: relacionActual.nombre,
+          })),
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje = 'No se pudo eliminar la relación UML'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general si la respuesta no contiene JSON.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+      setModeloAbierto(modeloActualizado)
+
+      if (relacionEditandoId === relacion.id) {
+        setRelacionEditandoId(null)
+        setClaseOrigenRelacion('')
+        setClaseDestinoRelacion('')
+        setTipoRelacion('ASOCIACION')
+        setMultiplicidadOrigenRelacion('1')
+        setMultiplicidadDestinoRelacion('*')
+        setNombreRelacion('')
+        setMostrarFormularioRelacion(false)
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorRelacion(error.message)
+      } else {
+        setErrorRelacion('Ocurrió un error al eliminar la relación UML')
+      }
+    } finally {
+      setEliminandoRelacionId(null)
+    }
+  }
+
+  const cancelarCreacionRelacion = () => {
+    setRelacionEditandoId(null)
+    setClaseOrigenRelacion('')
+    setClaseDestinoRelacion('')
+    setTipoRelacion('ASOCIACION')
+    setMultiplicidadOrigenRelacion('1')
+    setMultiplicidadDestinoRelacion('*')
+    setNombreRelacion('')
+    setErrorRelacion('')
+    setMostrarFormularioRelacion(false)
+  }
+
   const cerrarProyecto = () => {
     setProyectoAbierto(null)
     setModeloAbierto(null)
     setErrorAbrir('')
     setErrorGuardado('')
+    setMostrarFormularioRelacion(false)
+    setRelacionEditandoId(null)
+    setEliminandoRelacionId(null)
+    setClaseOrigenRelacion('')
+    setClaseDestinoRelacion('')
+    setTipoRelacion('ASOCIACION')
+    setMultiplicidadOrigenRelacion('1')
+    setMultiplicidadDestinoRelacion('*')
+    setNombreRelacion('')
+    setErrorRelacion('')
     setMostrarFormularioClase(false)
     setNombreClase('')
     setClaseEditandoId(null)
@@ -1016,24 +1333,281 @@ function App() {
                 </p>
               </div>
 
-              <button
-                className="boton-nueva-clase"
-                type="button"
-                onClick={() => {
-                  setClaseEditandoId(null)
-                  setNombreClase('')
-                  setErrorClase('')
-                  setMostrarFormularioClase(true)
-                }}
-                disabled={
-                  creandoClase ||
-                  guardandoModelo ||
-                  eliminandoClaseId !== null
-                }
-              >
-                + Nueva clase
-              </button>
+              <div className="acciones-principales-editor">
+                <button
+                  className="boton-nueva-relacion"
+                  type="button"
+                  onClick={() => {
+                    setRelacionEditandoId(null)
+                    setClaseOrigenRelacion('')
+                    setClaseDestinoRelacion('')
+                    setTipoRelacion('ASOCIACION')
+                    setMultiplicidadOrigenRelacion('1')
+                    setMultiplicidadDestinoRelacion('*')
+                    setNombreRelacion('')
+                    setErrorRelacion('')
+                    setMostrarFormularioRelacion(true)
+                  }}
+                  disabled={
+                    modeloAbierto.clases.length === 0 ||
+                    creandoRelacion ||
+                    creandoClase ||
+                    guardandoModelo ||
+                    eliminandoClaseId !== null ||
+                    eliminandoRelacionId !== null
+                  }
+                >
+                  + Nueva relación
+                </button>
+
+                <button
+                  className="boton-nueva-clase"
+                  type="button"
+                  onClick={() => {
+                    setClaseEditandoId(null)
+                    setNombreClase('')
+                    setErrorClase('')
+                    setMostrarFormularioClase(true)
+                  }}
+                  disabled={
+                    creandoClase ||
+                    creandoRelacion ||
+                    guardandoModelo ||
+                    eliminandoClaseId !== null
+                  }
+                >
+                  + Nueva clase
+                </button>
+              </div>
             </div>
+
+            {mostrarFormularioRelacion && (
+              <form
+                className="formulario-relacion"
+                onSubmit={guardarRelacion}
+              >
+                <h3>{relacionEditandoId ? 'Editar relación' : 'Nueva relación'}</h3>
+
+                <div className="campos-relacion">
+                  <div className="campo">
+                    <label htmlFor="claseOrigenRelacion">Clase origen</label>
+
+                    <select
+                      id="claseOrigenRelacion"
+                      value={claseOrigenRelacion}
+                      onChange={(evento) =>
+                        setClaseOrigenRelacion(evento.target.value)
+                      }
+                      disabled={relacionEditandoId !== null}
+                    >
+                      <option value="">Selecciona una clase</option>
+
+                      {modeloAbierto.clases.map((clase) => (
+                        <option key={clase.id} value={clase.id}>
+                          {clase.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="campo">
+                    <label htmlFor="claseDestinoRelacion">Clase destino</label>
+
+                    <select
+                      id="claseDestinoRelacion"
+                      value={claseDestinoRelacion}
+                      onChange={(evento) =>
+                        setClaseDestinoRelacion(evento.target.value)
+                      }
+                      disabled={relacionEditandoId !== null}
+                    >
+                      <option value="">Selecciona una clase</option>
+
+                      {modeloAbierto.clases.map((clase) => (
+                        <option key={clase.id} value={clase.id}>
+                          {clase.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {relacionEditandoId && (
+                  <p className="ayuda-relacion">
+                    El origen y el destino se mantienen para esta relación.
+                  </p>
+                )}
+
+                <div className="campos-relacion">
+                  <div className="campo">
+                    <label htmlFor="tipoRelacion">Tipo</label>
+
+                    <input
+                      id="tipoRelacion"
+                      type="text"
+                      value={tipoRelacion}
+                      onChange={(evento) =>
+                        setTipoRelacion(evento.target.value)
+                      }
+                      maxLength={30}
+                      placeholder="Ej: ASOCIACION"
+                    />
+                  </div>
+
+                  <div className="campo">
+                    <label htmlFor="nombreRelacion">Nombre</label>
+
+                    <input
+                      id="nombreRelacion"
+                      type="text"
+                      value={nombreRelacion}
+                      onChange={(evento) =>
+                        setNombreRelacion(evento.target.value)
+                      }
+                      maxLength={100}
+                      placeholder="Ej: contiene"
+                    />
+                  </div>
+                </div>
+
+                <div className="campos-relacion">
+                  <div className="campo">
+                    <label htmlFor="multiplicidadOrigenRelacion">
+                      Multiplicidad origen
+                    </label>
+
+                    <input
+                      id="multiplicidadOrigenRelacion"
+                      type="text"
+                      value={multiplicidadOrigenRelacion}
+                      onChange={(evento) =>
+                        setMultiplicidadOrigenRelacion(evento.target.value)
+                      }
+                      maxLength={20}
+                      placeholder="Ej: 1"
+                    />
+                  </div>
+
+                  <div className="campo">
+                    <label htmlFor="multiplicidadDestinoRelacion">
+                      Multiplicidad destino
+                    </label>
+
+                    <input
+                      id="multiplicidadDestinoRelacion"
+                      type="text"
+                      value={multiplicidadDestinoRelacion}
+                      onChange={(evento) =>
+                        setMultiplicidadDestinoRelacion(evento.target.value)
+                      }
+                      maxLength={20}
+                      placeholder="Ej: *"
+                    />
+                  </div>
+                </div>
+
+                {errorRelacion && (
+                  <p className="error-formulario">{errorRelacion}</p>
+                )}
+
+                <div className="acciones-formulario">
+                  <button
+                    className="boton-cancelar"
+                    type="button"
+                    onClick={cancelarCreacionRelacion}
+                    disabled={creandoRelacion}
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    className="boton-guardar"
+                    type="submit"
+                    disabled={creandoRelacion}
+                  >
+                    {creandoRelacion
+                      ? 'Guardando...'
+                      : relacionEditandoId
+                        ? 'Guardar cambios'
+                        : 'Crear relación'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {modeloAbierto.relaciones.length > 0 && (
+              <div className="panel-relaciones">
+                <div className="encabezado-panel-relaciones">
+                  <h3>Relaciones del modelo</h3>
+                  <span>{modeloAbierto.relaciones.length}</span>
+                </div>
+
+                <div className="lista-relaciones">
+                  {modeloAbierto.relaciones.map((relacion) => {
+                    const claseOrigen = modeloAbierto.clases.find(
+                      (clase) => clase.id === relacion.claseOrigenId,
+                    )
+                    const claseDestino = modeloAbierto.clases.find(
+                      (clase) => clase.id === relacion.claseDestinoId,
+                    )
+
+                    return (
+                      <div className="fila-relacion" key={relacion.id}>
+                        <div className="info-relacion">
+                          <strong>
+                            {claseOrigen?.nombre ?? 'Clase origen'} →{' '}
+                            {claseDestino?.nombre ?? 'Clase destino'}
+                          </strong>
+
+                          <span>
+                            {relacion.nombre || 'Sin nombre'} · {relacion.tipo}
+                          </span>
+
+                          <span>
+                            Multiplicidad: {relacion.multiplicidadOrigen ?? '-'} →{' '}
+                            {relacion.multiplicidadDestino ?? '-'}
+                          </span>
+                        </div>
+
+                        <div className="acciones-relacion">
+                          <button
+                            className="boton-editar-relacion"
+                            type="button"
+                            onClick={() => editarRelacion(relacion)}
+                            disabled={
+                              creandoRelacion ||
+                              creandoClase ||
+                              creandoAtributo ||
+                              guardandoModelo ||
+                              eliminandoRelacionId !== null
+                            }
+                          >
+                            Editar
+                          </button>
+
+                          <button
+                            className="boton-eliminar-relacion"
+                            type="button"
+                            onClick={() => eliminarRelacion(relacion)}
+                            disabled={
+                              creandoRelacion ||
+                              creandoClase ||
+                              creandoAtributo ||
+                              guardandoModelo ||
+                              eliminandoRelacionId !== null
+                            }
+                          >
+                            {eliminandoRelacionId === relacion.id
+                              ? 'Eliminando...'
+                              : 'Eliminar'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {mostrarFormularioClase && (
               <form className="formulario-clase" onSubmit={guardarClase}>
@@ -1098,9 +1672,11 @@ function App() {
                         onClick={() => editarClase(claseSeleccionada)}
                         disabled={
                           creandoClase ||
+                          creandoRelacion ||
                           creandoAtributo ||
                           guardandoModelo ||
-                          eliminandoClaseId !== null
+                          eliminandoClaseId !== null ||
+                          eliminandoRelacionId !== null
                         }
                       >
                         Editar clase
@@ -1112,9 +1688,11 @@ function App() {
                         onClick={() => eliminarClase(claseSeleccionada)}
                         disabled={
                           creandoClase ||
+                          creandoRelacion ||
                           creandoAtributo ||
                           guardandoModelo ||
-                          eliminandoClaseId !== null
+                          eliminandoClaseId !== null ||
+                          eliminandoRelacionId !== null
                         }
                       >
                         {eliminandoClaseId === claseSeleccionada.id
@@ -1136,9 +1714,11 @@ function App() {
                         }}
                         disabled={
                           creandoAtributo ||
+                          creandoRelacion ||
                           creandoClase ||
                           guardandoModelo ||
-                          eliminandoClaseId !== null
+                          eliminandoClaseId !== null ||
+                          eliminandoRelacionId !== null
                         }
                       >
                         + Atributo
@@ -1311,8 +1891,20 @@ function App() {
                 nodes={nodos}
                 edges={aristas}
                 onNodesChange={onNodesChange}
+                onEdgeClick={(_, arista) => {
+                  const relacion = modeloAbierto.relaciones.find(
+                    (relacionActual) => relacionActual.id === arista.id,
+                  )
+
+                  if (relacion) {
+                    editarRelacion(relacion)
+                  }
+                }}
                 onNodeClick={(_, nodo) => {
                   setClaseSeleccionadaId(nodo.id)
+                  setMostrarFormularioRelacion(false)
+                  setRelacionEditandoId(null)
+                  setErrorRelacion('')
                   setMostrarFormularioAtributo(false)
                   setAtributoEditandoId(null)
                   setErrorAtributo('')
@@ -1326,9 +1918,11 @@ function App() {
                 nodesDraggable={
                   !guardandoModelo &&
                   !creandoClase &&
+                  !creandoRelacion &&
                   !creandoAtributo &&
                   eliminandoAtributoId === null &&
-                  eliminandoClaseId === null
+                  eliminandoClaseId === null &&
+                  eliminandoRelacionId === null
                 }
                 nodesConnectable={false}
               >

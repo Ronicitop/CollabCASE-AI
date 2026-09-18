@@ -543,3 +543,172 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.acciones-principales-editor {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.boton-nueva-relacion {
+  border: none;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #ffffff;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.boton-nueva-relacion:hover {
+  background: #115e59;
+}
+
+.boton-nueva-relacion:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.formulario-relacion {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.formulario-relacion h3 {
+  margin: 0 0 18px;
+  color: #111827;
+}
+
+.campos-relacion {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.campo select {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 11px 12px;
+  font: inherit;
+  background: #ffffff;
+}
+
+.campo select:focus {
+  outline: 2px solid #2563eb;
+  border-color: #2563eb;
+}
+
+@media (max-width: 700px) {
+  .campos-relacion {
+    grid-template-columns: 1fr;
+  }
+}
+.formulario-relacion input,
+.formulario-relacion select {
+  background: #ffffff;
+  color: #111827;
+}
+
+.formulario-relacion select option {
+  background: #ffffff;
+  color: #111827;
+}
+.panel-relaciones {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.encabezado-panel-relaciones {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.encabezado-panel-relaciones h3 {
+  margin: 0;
+}
+
+.encabezado-panel-relaciones span {
+  font-weight: 700;
+}
+
+.lista-relaciones {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fila-relacion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.info-relacion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-relacion span {
+  font-size: 0.92rem;
+}
+
+.boton-editar-relacion {
+  border: none;
+  border-radius: 8px;
+  padding: 9px 13px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.boton-editar-relacion:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ayuda-relacion {
+  margin: 8px 0 14px;
+  font-size: 0.92rem;
+}
+
+.formulario-relacion select:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+.acciones-relacion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.boton-eliminar-relacion {
+  border: none;
+  border-radius: 8px;
+  padding: 9px 13px;
+  cursor: pointer;
+  font-weight: 600;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.boton-eliminar-relacion:hover {
+  background: #fecaca;
+}
+
+.boton-eliminar-relacion:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
