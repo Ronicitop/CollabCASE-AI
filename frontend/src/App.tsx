@@ -127,6 +127,15 @@ function App() {
   const [creandoClase, setCreandoClase] = useState(false)
   const [errorClase, setErrorClase] = useState('')
 
+  const [claseSeleccionadaId, setClaseSeleccionadaId] = useState<string | null>(null)
+  const [mostrarFormularioAtributo, setMostrarFormularioAtributo] = useState(false)
+  const [nombreAtributo, setNombreAtributo] = useState('')
+  const [tipoDatoAtributo, setTipoDatoAtributo] = useState('')
+  const [permiteNuloAtributo, setPermiteNuloAtributo] = useState(false)
+  const [identificadorAtributo, setIdentificadorAtributo] = useState(false)
+  const [creandoAtributo, setCreandoAtributo] = useState(false)
+  const [errorAtributo, setErrorAtributo] = useState('')
+
   useEffect(() => {
     fetch('http://localhost:8080/api/proyectos')
       .then((respuesta) => {
@@ -479,6 +488,158 @@ function App() {
     setMostrarFormularioClase(false)
   }
 
+  const crearAtributo = async (evento: FormEvent<HTMLFormElement>) => {
+    evento.preventDefault()
+
+    if (!proyectoAbierto || !modeloAbierto || !claseSeleccionadaId) {
+      return
+    }
+
+    const nombreLimpio = nombreAtributo.trim()
+    const tipoDatoLimpio = tipoDatoAtributo.trim()
+
+    if (!nombreLimpio) {
+      setErrorAtributo('El nombre del atributo es obligatorio.')
+      return
+    }
+
+    if (!tipoDatoLimpio) {
+      setErrorAtributo('El tipo de dato es obligatorio.')
+      return
+    }
+
+    const claseSeleccionada = modeloAbierto.clases.find(
+      (clase) => clase.id === claseSeleccionadaId,
+    )
+
+    if (!claseSeleccionada) {
+      setErrorAtributo('La clase seleccionada ya no está disponible.')
+      return
+    }
+
+    const nombreDuplicado = claseSeleccionada.atributos.some(
+      (atributo) =>
+        atributo.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase(),
+    )
+
+    if (nombreDuplicado) {
+      setErrorAtributo('Ya existe un atributo con ese nombre en la clase.')
+      return
+    }
+
+    try {
+      setCreandoAtributo(true)
+      setErrorAtributo('')
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      const solicitud = {
+        clases: modeloAbierto.clases.map((clase) => {
+          const posicion = posicionesPorId.get(clase.id) ?? {
+            x: clase.posicionX,
+            y: clase.posicionY,
+          }
+
+          const atributos = [
+            ...clase.atributos.map((atributo) => ({
+              id: atributo.id as string | null,
+              nombre: atributo.nombre,
+              tipoDato: atributo.tipoDato,
+              permiteNulo: atributo.permiteNulo,
+              identificador: atributo.identificador,
+            })),
+            ...(clase.id === claseSeleccionadaId
+              ? [
+                  {
+                    id: null,
+                    nombre: nombreLimpio,
+                    tipoDato: tipoDatoLimpio,
+                    permiteNulo: permiteNuloAtributo,
+                    identificador: identificadorAtributo,
+                  },
+                ]
+              : []),
+          ]
+
+          return {
+            id: clase.id,
+            claveCliente: clase.id,
+            nombre: clase.nombre,
+            posicionX: posicion.x,
+            posicionY: posicion.y,
+            atributos,
+          }
+        }),
+
+        relaciones: modeloAbierto.relaciones.map((relacion) => ({
+          id: relacion.id,
+          claseOrigenClave: relacion.claseOrigenId,
+          claseDestinoClave: relacion.claseDestinoId,
+          tipo: relacion.tipo,
+          multiplicidadOrigen: relacion.multiplicidadOrigen,
+          multiplicidadDestino: relacion.multiplicidadDestino,
+          nombre: relacion.nombre,
+        })),
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje = 'No se pudo crear el atributo UML'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general si la respuesta no contiene JSON.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+      setNombreAtributo('')
+      setTipoDatoAtributo('')
+      setPermiteNuloAtributo(false)
+      setIdentificadorAtributo(false)
+      setMostrarFormularioAtributo(false)
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorAtributo(error.message)
+      } else {
+        setErrorAtributo('Ocurrió un error al crear el atributo UML')
+      }
+    } finally {
+      setCreandoAtributo(false)
+    }
+  }
+
+  const cancelarCreacionAtributo = () => {
+    setNombreAtributo('')
+    setTipoDatoAtributo('')
+    setPermiteNuloAtributo(false)
+    setIdentificadorAtributo(false)
+    setErrorAtributo('')
+    setMostrarFormularioAtributo(false)
+  }
+
   const cerrarProyecto = () => {
     setProyectoAbierto(null)
     setModeloAbierto(null)
@@ -487,10 +648,20 @@ function App() {
     setMostrarFormularioClase(false)
     setNombreClase('')
     setErrorClase('')
+    setClaseSeleccionadaId(null)
+    setMostrarFormularioAtributo(false)
+    setNombreAtributo('')
+    setTipoDatoAtributo('')
+    setPermiteNuloAtributo(false)
+    setIdentificadorAtributo(false)
+    setErrorAtributo('')
   }
 
   if (proyectoAbierto && modeloAbierto) {
     const aristas = construirAristas(modeloAbierto)
+    const claseSeleccionada =
+      modeloAbierto.clases.find((clase) => clase.id === claseSeleccionadaId) ??
+      null
 
     return (
       <div className="app">
@@ -582,6 +753,127 @@ function App() {
               </form>
             )}
 
+            <div className="panel-clase-seleccionada">
+              {claseSeleccionada ? (
+                <>
+                  <div className="encabezado-clase-seleccionada">
+                    <div>
+                      <h3>Clase seleccionada: {claseSeleccionada.nombre}</h3>
+                      <p>
+                        Atributos: <strong>{claseSeleccionada.atributos.length}</strong>
+                      </p>
+                    </div>
+
+                    <button
+                      className="boton-nuevo-atributo"
+                      type="button"
+                      onClick={() => {
+                        setErrorAtributo('')
+                        setMostrarFormularioAtributo(true)
+                      }}
+                      disabled={
+                        creandoAtributo || creandoClase || guardandoModelo
+                      }
+                    >
+                      + Atributo
+                    </button>
+                  </div>
+
+                  {mostrarFormularioAtributo && (
+                    <form
+                      className="formulario-atributo"
+                      onSubmit={crearAtributo}
+                    >
+                      <div className="campo">
+                        <label htmlFor="nombreAtributo">Nombre</label>
+
+                        <input
+                          id="nombreAtributo"
+                          type="text"
+                          value={nombreAtributo}
+                          onChange={(evento) =>
+                            setNombreAtributo(evento.target.value)
+                          }
+                          maxLength={100}
+                          placeholder="Ej: correo"
+                          autoFocus
+                        />
+                      </div>
+
+                      <div className="campo">
+                        <label htmlFor="tipoDatoAtributo">Tipo de dato</label>
+
+                        <input
+                          id="tipoDatoAtributo"
+                          type="text"
+                          value={tipoDatoAtributo}
+                          onChange={(evento) =>
+                            setTipoDatoAtributo(evento.target.value)
+                          }
+                          maxLength={50}
+                          placeholder="Ej: String"
+                        />
+                      </div>
+
+                      <div className="opciones-atributo">
+                        <label className="opcion-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={permiteNuloAtributo}
+                            onChange={(evento) =>
+                              setPermiteNuloAtributo(evento.target.checked)
+                            }
+                          />
+                          Permite nulo
+                        </label>
+
+                        <label className="opcion-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={identificadorAtributo}
+                            onChange={(evento) =>
+                              setIdentificadorAtributo(evento.target.checked)
+                            }
+                          />
+                          Identificador
+                        </label>
+                      </div>
+
+                      {errorAtributo && (
+                        <p className="error-formulario">{errorAtributo}</p>
+                      )}
+
+                      <div className="acciones-formulario">
+                        <button
+                          className="boton-cancelar"
+                          type="button"
+                          onClick={cancelarCreacionAtributo}
+                          disabled={creandoAtributo}
+                        >
+                          Cancelar
+                        </button>
+
+                        <button
+                          className="boton-guardar"
+                          type="submit"
+                          disabled={creandoAtributo}
+                        >
+                          {creandoAtributo
+                            ? 'Creando...'
+                            : 'Crear atributo'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </>
+              ) : (
+                <p className="ayuda-seleccion">
+                  Haz clic sobre una clase del lienzo para seleccionarla y
+                  administrar sus atributos.
+                </p>
+              )}
+            </div>
+
             {guardandoModelo && <p>Guardando posición...</p>}
 
             {errorGuardado && (
@@ -599,9 +891,16 @@ function App() {
                 nodes={nodos}
                 edges={aristas}
                 onNodesChange={onNodesChange}
+                onNodeClick={(_, nodo) => {
+                  setClaseSeleccionadaId(nodo.id)
+                  setMostrarFormularioAtributo(false)
+                  setErrorAtributo('')
+                }}
                 onNodeDragStop={(_, nodo) => guardarPosicionNodo(nodo)}
                 fitView
-                nodesDraggable={!guardandoModelo && !creandoClase}
+                nodesDraggable={
+                  !guardandoModelo && !creandoClase && !creandoAtributo
+                }
                 nodesConnectable={false}
               >
                 <Background gap={20} size={1} />
