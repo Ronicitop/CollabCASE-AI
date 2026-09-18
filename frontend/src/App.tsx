@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   Background,
@@ -10,6 +10,8 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react'
+
+import { Client } from '@stomp/stompjs'
 
 import '@xyflow/react/dist/style.css'
 import './App.css'
@@ -56,6 +58,17 @@ type ModeloCompleto = {
   clases: ClaseDiagrama[]
   relaciones: RelacionDiagrama[]
 }
+
+
+type SesionColaborativa = {
+  id: string
+  codigo: string
+  proyectoId: string
+  activa: boolean
+  creadaEn: string
+}
+
+type EstadoConexion = 'desconectado' | 'conectando' | 'conectado'
 
 
 const construirNodos = (modelo: ModeloCompleto): Node[] => {
@@ -122,6 +135,15 @@ function App() {
   const [guardandoModelo, setGuardandoModelo] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
 
+  const clienteStompRef = useRef<Client | null>(null)
+  const [sesionColaborativa, setSesionColaborativa] =
+    useState<SesionColaborativa | null>(null)
+  const [estadoConexion, setEstadoConexion] =
+    useState<EstadoConexion>('desconectado')
+  const [codigoSesion, setCodigoSesion] = useState('')
+  const [procesandoSesion, setProcesandoSesion] = useState(false)
+  const [errorColaboracion, setErrorColaboracion] = useState('')
+
   const [mostrarFormularioClase, setMostrarFormularioClase] = useState(false)
   const [nombreClase, setNombreClase] = useState('')
   const [creandoClase, setCreandoClase] = useState(false)
@@ -179,6 +201,15 @@ function App() {
       setNodos([])
     }
   }, [modeloAbierto, setNodos])
+
+
+  useEffect(() => {
+    return () => {
+      if (clienteStompRef.current) {
+        void clienteStompRef.current.deactivate()
+      }
+    }
+  }, [])
 
   const crearProyecto = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault()
@@ -269,6 +300,251 @@ function App() {
     return respuesta.json()
   }
 
+  const conectarWebSocket = (
+    sesion: SesionColaborativa,
+    modeloInicial: ModeloCompleto,
+  ) => {
+    if (clienteStompRef.current) {
+      void clienteStompRef.current.deactivate()
+    }
+
+    setEstadoConexion('conectando')
+    setErrorColaboracion('')
+
+    const cliente = new Client({
+      brokerURL: 'ws://localhost:8080/ws',
+      reconnectDelay: 3000,
+      heartbeatIncoming: 10000,
+      heartbeatOutgoing: 10000,
+    })
+
+    cliente.onConnect = () => {
+      setEstadoConexion('conectado')
+
+      cliente.subscribe(
+        `/topic/sesiones/${sesion.codigo}/modelo`,
+        (mensaje) => {
+          try {
+            const modeloRecibido: ModeloCompleto = JSON.parse(mensaje.body)
+
+            if (modeloRecibido.proyectoId === sesion.proyectoId) {
+              setModeloAbierto(modeloRecibido)
+              setErrorGuardado('')
+            }
+          } catch {
+            setErrorColaboracion(
+              'Se recibió una actualización colaborativa inválida.',
+            )
+          }
+        },
+      )
+    }
+
+    cliente.onStompError = (frame) => {
+      setEstadoConexion('desconectado')
+      setErrorColaboracion(
+        frame.headers.message ||
+          'Ocurrió un error en la conexión colaborativa.',
+      )
+    }
+
+    cliente.onWebSocketClose = () => {
+      setEstadoConexion('desconectado')
+    }
+
+    clienteStompRef.current = cliente
+    setModeloAbierto(modeloInicial)
+    cliente.activate()
+  }
+
+  const iniciarSesionColaborativa = async () => {
+    if (!proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    try {
+      setProcesandoSesion(true)
+      setErrorColaboracion('')
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/sesiones-colaborativas/proyecto/${proyectoAbierto.id}`,
+        {
+          method: 'POST',
+        },
+      )
+
+      if (!respuesta.ok) {
+        throw new Error('No se pudo iniciar la sesión colaborativa.')
+      }
+
+      const sesion: SesionColaborativa = await respuesta.json()
+
+      setSesionColaborativa(sesion)
+      setCodigoSesion(sesion.codigo)
+      conectarWebSocket(sesion, modeloAbierto)
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorColaboracion(error.message)
+      } else {
+        setErrorColaboracion(
+          'Ocurrió un error al iniciar la sesión colaborativa.',
+        )
+      }
+    } finally {
+      setProcesandoSesion(false)
+    }
+  }
+
+  const unirseSesionColaborativa = async (
+    evento: FormEvent<HTMLFormElement>,
+  ) => {
+    evento.preventDefault()
+
+    const codigoNormalizado = codigoSesion.trim().toUpperCase()
+
+    if (!codigoNormalizado) {
+      setErrorColaboracion('Ingresa el código de la sesión.')
+      return
+    }
+
+    try {
+      setProcesandoSesion(true)
+      setErrorColaboracion('')
+
+      const respuestaSesion = await fetch(
+        `http://localhost:8080/api/sesiones-colaborativas/unirse/${encodeURIComponent(codigoNormalizado)}`,
+        {
+          method: 'POST',
+        },
+      )
+
+      if (!respuestaSesion.ok) {
+        let mensaje = 'No se pudo unir a la sesión colaborativa.'
+
+        try {
+          const detalle = await respuestaSesion.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const sesion: SesionColaborativa = await respuestaSesion.json()
+
+      const proyectoExistente = proyectos.find(
+        (proyectoActual) => proyectoActual.id === sesion.proyectoId,
+      )
+
+      let proyectoSesion: Proyecto
+
+      if (proyectoExistente) {
+        proyectoSesion = proyectoExistente
+      } else {
+        const respuestaProyecto = await fetch(
+          `http://localhost:8080/api/proyectos/${sesion.proyectoId}`,
+        )
+
+        if (!respuestaProyecto.ok) {
+          throw new Error(
+            'La sesión existe, pero no se pudo cargar su proyecto.',
+          )
+        }
+
+        proyectoSesion = (await respuestaProyecto.json()) as Proyecto
+      }
+
+      const modelo = await obtenerModeloCompleto(sesion.proyectoId)
+
+      setProyectoAbierto(proyectoSesion)
+      setModeloAbierto(modelo)
+      setSesionColaborativa(sesion)
+      setCodigoSesion(sesion.codigo)
+      conectarWebSocket(sesion, modelo)
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorColaboracion(error.message)
+      } else {
+        setErrorColaboracion(
+          'Ocurrió un error al unirse a la sesión colaborativa.',
+        )
+      }
+    } finally {
+      setProcesandoSesion(false)
+    }
+  }
+
+  const salirSesionColaborativa = () => {
+    if (clienteStompRef.current) {
+      void clienteStompRef.current.deactivate()
+      clienteStompRef.current = null
+    }
+
+    setSesionColaborativa(null)
+    setEstadoConexion('desconectado')
+    setCodigoSesion('')
+    setErrorColaboracion('')
+  }
+
+  const guardarModeloConTransporte = async (
+    solicitud: unknown,
+    mensajeError: string,
+  ): Promise<ModeloCompleto | null> => {
+    if (!proyectoAbierto) {
+      throw new Error('No hay un proyecto abierto.')
+    }
+
+    if (sesionColaborativa) {
+      const cliente = clienteStompRef.current
+
+      if (estadoConexion !== 'conectado' || !cliente?.connected) {
+        throw new Error(
+          'La sesión colaborativa no está conectada. Espera la reconexión antes de guardar cambios.',
+        )
+      }
+
+      cliente.publish({
+        destination: `/app/sesiones/${sesionColaborativa.codigo}/modelo`,
+        body: JSON.stringify(solicitud),
+      })
+
+      return null
+    }
+
+    const respuesta = await fetch(
+      `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify(solicitud),
+      },
+    )
+
+    if (!respuesta.ok) {
+      let mensaje = mensajeError
+
+      try {
+        const detalle = await respuesta.json()
+
+        if (detalle?.mensaje) {
+          mensaje = detalle.mensaje
+        }
+      } catch {
+        // Conservamos el mensaje general si la respuesta no contiene JSON.
+      }
+
+      throw new Error(mensaje)
+    }
+
+    return respuesta.json()
+  }
+
   const abrirProyecto = async (proyecto: Proyecto) => {
     try {
       setAbriendoId(proyecto.id)
@@ -338,36 +614,14 @@ function App() {
         })),
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        'No se pudo guardar la nueva posición de la clase',
       )
 
-      if (!respuesta.ok) {
-        let mensaje = 'No se pudo guardar la nueva posición de la clase'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Si la respuesta no contiene JSON, conservamos el mensaje general.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-
-      setModeloAbierto(modeloActualizado)
     } catch (error) {
       // Volvemos a las posiciones confirmadas por el modelo canónico.
       setNodos(construirNodos(modeloAbierto))
@@ -472,39 +726,16 @@ function App() {
         })),
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        claseEditandoId === null
+          ? 'No se pudo crear la clase UML'
+          : 'No se pudo actualizar la clase UML',
       )
 
-      if (!respuesta.ok) {
-        let mensaje =
-          claseEditandoId === null
-            ? 'No se pudo crear la clase UML'
-            : 'No se pudo actualizar la clase UML'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Conservamos el mensaje general si la respuesta no contiene JSON.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-
-      setModeloAbierto(modeloActualizado)
       setNombreClase('')
       setClaseEditandoId(null)
       setMostrarFormularioClase(false)
@@ -597,36 +828,14 @@ function App() {
           })),
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        'No se pudo eliminar la clase UML',
       )
 
-      if (!respuesta.ok) {
-        let mensaje = 'No se pudo eliminar la clase UML'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Conservamos el mensaje general si la respuesta no contiene JSON.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-
-      setModeloAbierto(modeloActualizado)
 
       if (claseSeleccionadaId === clase.id) {
         setClaseSeleccionadaId(null)
@@ -781,39 +990,16 @@ function App() {
         })),
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        atributoEditandoId === null
+          ? 'No se pudo crear el atributo UML'
+          : 'No se pudo actualizar el atributo UML',
       )
 
-      if (!respuesta.ok) {
-        let mensaje =
-          atributoEditandoId === null
-            ? 'No se pudo crear el atributo UML'
-            : 'No se pudo actualizar el atributo UML'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Conservamos el mensaje general si la respuesta no contiene JSON.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-
-      setModeloAbierto(modeloActualizado)
       setNombreAtributo('')
       setTipoDatoAtributo('')
       setPermiteNuloAtributo(false)
@@ -905,36 +1091,14 @@ function App() {
         })),
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        'No se pudo eliminar el atributo UML',
       )
 
-      if (!respuesta.ok) {
-        let mensaje = 'No se pudo eliminar el atributo UML'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Conservamos el mensaje general si la respuesta no contiene JSON.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-
-      setModeloAbierto(modeloActualizado)
 
       if (atributoEditandoId === atributo.id) {
         setNombreAtributo('')
@@ -1064,39 +1228,16 @@ function App() {
             : relacionesExistentes,
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        relacionEditandoId === null
+          ? 'No se pudo crear la relación UML'
+          : 'No se pudo actualizar la relación UML',
       )
 
-      if (!respuesta.ok) {
-        let mensaje =
-          relacionEditandoId === null
-            ? 'No se pudo crear la relación UML'
-            : 'No se pudo actualizar la relación UML'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Conservamos el mensaje general si la respuesta no contiene JSON.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-
-      setModeloAbierto(modeloActualizado)
       setRelacionEditandoId(null)
       setClaseOrigenRelacion('')
       setClaseDestinoRelacion('')
@@ -1197,35 +1338,14 @@ function App() {
           })),
       }
 
-      const respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: JSON.stringify(solicitud),
-        },
+      const modeloActualizado = await guardarModeloConTransporte(
+        solicitud,
+        'No se pudo eliminar la relación UML',
       )
 
-      if (!respuesta.ok) {
-        let mensaje = 'No se pudo eliminar la relación UML'
-
-        try {
-          const detalle = await respuesta.json()
-
-          if (detalle?.mensaje) {
-            mensaje = detalle.mensaje
-          }
-        } catch {
-          // Conservamos el mensaje general si la respuesta no contiene JSON.
-        }
-
-        throw new Error(mensaje)
+      if (modeloActualizado) {
+        setModeloAbierto(modeloActualizado)
       }
-
-      const modeloActualizado: ModeloCompleto = await respuesta.json()
-      setModeloAbierto(modeloActualizado)
 
       if (relacionEditandoId === relacion.id) {
         setRelacionEditandoId(null)
@@ -1261,6 +1381,7 @@ function App() {
   }
 
   const cerrarProyecto = () => {
+    salirSesionColaborativa()
     setProyectoAbierto(null)
     setModeloAbierto(null)
     setErrorAbrir('')
@@ -1316,6 +1437,54 @@ function App() {
 
         <main className="contenido">
           <section className="panel-editor">
+            <div className="panel-colaboracion">
+              <div>
+                <h3>Colaboración en tiempo real</h3>
+
+                {sesionColaborativa ? (
+                  <p>
+                    Código: <strong>{sesionColaborativa.codigo}</strong>
+                    {' · '}
+                    Estado:{' '}
+                    <strong>
+                      {estadoConexion === 'conectado'
+                        ? 'Conectado'
+                        : estadoConexion === 'conectando'
+                          ? 'Conectando...'
+                          : 'Desconectado'}
+                    </strong>
+                  </p>
+                ) : (
+                  <p>Inicia una sesión para compartir este proyecto.</p>
+                )}
+              </div>
+
+              {sesionColaborativa ? (
+                <button
+                  className="boton-salir-sesion"
+                  type="button"
+                  onClick={salirSesionColaborativa}
+                >
+                  Salir de la sesión
+                </button>
+              ) : (
+                <button
+                  className="boton-iniciar-sesion"
+                  type="button"
+                  onClick={iniciarSesionColaborativa}
+                  disabled={procesandoSesion}
+                >
+                  {procesandoSesion
+                    ? 'Iniciando...'
+                    : 'Iniciar sesión colaborativa'}
+                </button>
+              )}
+            </div>
+
+            {errorColaboracion && (
+              <p className="error-formulario">{errorColaboracion}</p>
+            )}
+
             <div className="barra-editor">
               <div>
                 <h2>Editor UML</h2>
@@ -1961,6 +2130,40 @@ function App() {
             + Nuevo proyecto
           </button>
         </section>
+
+        <form
+          className="formulario-unirse-sesion"
+          onSubmit={unirseSesionColaborativa}
+        >
+          <div>
+            <h3>Unirse a una sesión colaborativa</h3>
+            <p>Ingresa el código compartido por el responsable de la sesión.</p>
+          </div>
+
+          <div className="fila-unirse-sesion">
+            <input
+              type="text"
+              value={codigoSesion}
+              onChange={(evento) =>
+                setCodigoSesion(evento.target.value.toUpperCase())
+              }
+              maxLength={8}
+              placeholder="Ej: 6AA03CE2"
+            />
+
+            <button
+              className="boton-unirse-sesion"
+              type="submit"
+              disabled={procesandoSesion}
+            >
+              {procesandoSesion ? 'Uniéndose...' : 'Unirse'}
+            </button>
+          </div>
+
+          {errorColaboracion && (
+            <p className="error-formulario">{errorColaboracion}</p>
+          )}
+        </form>
 
         {mostrarFormulario && (
           <form className="formulario-proyecto" onSubmit={crearProyecto}>
