@@ -6,6 +6,7 @@ import com.collabcase.colaboracion.dto.SesionColaborativaResponse;
 import com.collabcase.modelado.dominio.AtributoDiagrama;
 import com.collabcase.modelado.dominio.ClaseDiagrama;
 import com.collabcase.modelado.dominio.ModeloDiagrama;
+import com.collabcase.modelado.dominio.RelacionDiagrama;
 import com.collabcase.modelado.dto.ModeloCompletoResponse;
 import com.collabcase.modelado.repositorio.AtributoDiagramaRepository;
 import com.collabcase.modelado.repositorio.ClaseDiagramaRepository;
@@ -65,6 +66,15 @@ public class OperacionColaborativaService {
 
             case ELIMINAR_ATRIBUTO ->
                     eliminarAtributo(sesion, solicitud);
+
+            case CREAR_RELACION ->
+                    crearRelacion(sesion, solicitud);
+
+            case ACTUALIZAR_RELACION ->
+                    actualizarRelacion(sesion, solicitud);
+
+            case ELIMINAR_RELACION ->
+                    eliminarRelacion(sesion, solicitud);
 
             default ->
                     throw new IllegalStateException(
@@ -281,10 +291,14 @@ public class OperacionColaborativaService {
                 datos.get("claseId").asString()
         );
 
+        ModeloDiagrama modeloSesion =
+                obtenerModeloDeSesion(sesion);
+
         List<String> clavesBloqueo = List.of(
                 "CLASE:" + claseId + ":ESTRUCTURA",
                 "CLASE:" + claseId + ":NOMBRE",
-                "CLASE:" + claseId + ":POSICION"
+                "CLASE:" + claseId + ":POSICION",
+                "MODELO:" + modeloSesion.getId() + ":RELACIONES"
         );
 
         return gestorBloqueosColaborativos.ejecutarConBloqueos(
@@ -351,14 +365,16 @@ public class OperacionColaborativaService {
 
         validarAtributo(nombre, tipoDato);
 
-        String claveBloqueo =
+        List<String> clavesBloqueo = List.of(
+                "CLASE:" + claseId + ":ESTRUCTURA",
                 "CLASE:"
                         + claseId
                         + ":NOMBRE_ATRIBUTO:"
-                        + nombre.toLowerCase(Locale.ROOT);
+                        + nombre.toLowerCase(Locale.ROOT)
+        );
 
-        return gestorBloqueosColaborativos.ejecutarConBloqueo(
-                claveBloqueo,
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
                 () -> {
                     OperacionColaborativaResponse respuesta =
                             transactionTemplate.execute(status -> {
@@ -431,11 +447,17 @@ public class OperacionColaborativaService {
 
         validarAtributo(nombre, tipoDato);
 
-        String claveBloqueo =
-                "ATRIBUTO:" + atributoId;
+        List<String> clavesBloqueo = List.of(
+                "ATRIBUTO:" + atributoId,
+                "CLASE:" + claseId + ":ESTRUCTURA",
+                "CLASE:"
+                        + claseId
+                        + ":NOMBRE_ATRIBUTO:"
+                        + nombre.toLowerCase(Locale.ROOT)
+        );
 
-        return gestorBloqueosColaborativos.ejecutarConBloqueo(
-                claveBloqueo,
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
                 () -> {
                     OperacionColaborativaResponse respuesta =
                             transactionTemplate.execute(status -> {
@@ -523,11 +545,13 @@ public class OperacionColaborativaService {
                 datos.get("claseId").asString()
         );
 
-        String claveBloqueo =
-                "ATRIBUTO:" + atributoId;
+        List<String> clavesBloqueo = List.of(
+                "ATRIBUTO:" + atributoId,
+                "CLASE:" + claseId + ":ESTRUCTURA"
+        );
 
-        return gestorBloqueosColaborativos.ejecutarConBloqueo(
-                claveBloqueo,
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
                 () -> {
                     OperacionColaborativaResponse respuesta =
                             transactionTemplate.execute(status -> {
@@ -580,6 +604,336 @@ public class OperacionColaborativaService {
                     return validarRespuestaTransaccion(respuesta);
                 }
         );
+    }
+
+    private OperacionColaborativaResponse crearRelacion(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID claseOrigenId = UUID.fromString(
+                datos.get("claseOrigenId").asString()
+        );
+
+        UUID claseDestinoId = UUID.fromString(
+                datos.get("claseDestinoId").asString()
+        );
+
+        String tipo = datos.get("tipo").asString().trim();
+        String multiplicidadOrigen =
+                obtenerTextoOpcional(datos, "multiplicidadOrigen");
+        String multiplicidadDestino =
+                obtenerTextoOpcional(datos, "multiplicidadDestino");
+        String nombre =
+                obtenerTextoOpcional(datos, "nombre");
+
+        validarRelacion(
+                tipo,
+                multiplicidadOrigen,
+                multiplicidadDestino,
+                nombre
+        );
+
+        ModeloDiagrama modelo = obtenerModeloDeSesion(sesion);
+
+        List<String> clavesBloqueo = List.of(
+                "CLASE:" + claseOrigenId + ":ESTRUCTURA",
+                "CLASE:" + claseDestinoId + ":ESTRUCTURA",
+                "MODELO:" + modelo.getId() + ":RELACIONES"
+        );
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                ClaseDiagrama claseOrigen =
+                                        obtenerClaseDeSesion(
+                                                claseOrigenId,
+                                                sesion
+                                        );
+
+                                ClaseDiagrama claseDestino =
+                                        obtenerClaseDeSesion(
+                                                claseDestinoId,
+                                                sesion
+                                        );
+
+                                if (!claseOrigen.getModelo()
+                                        .getId()
+                                        .equals(modelo.getId())
+                                        || !claseDestino.getModelo()
+                                        .getId()
+                                        .equals(modelo.getId())) {
+
+                                    throw new IllegalStateException(
+                                            "Las clases de la relación no pertenecen al modelo de la sesión"
+                                    );
+                                }
+
+                                RelacionDiagrama nuevaRelacion =
+                                        RelacionDiagrama.builder()
+                                                .modelo(modelo)
+                                                .claseOrigen(claseOrigen)
+                                                .claseDestino(claseDestino)
+                                                .tipo(tipo)
+                                                .multiplicidadOrigen(
+                                                        multiplicidadOrigen
+                                                )
+                                                .multiplicidadDestino(
+                                                        multiplicidadDestino
+                                                )
+                                                .nombre(nombre)
+                                                .build();
+
+                                relacionDiagramaRepository.saveAndFlush(
+                                        nuevaRelacion
+                                );
+
+                                incrementarVersionModelo(
+                                        modelo.getId()
+                                );
+
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private OperacionColaborativaResponse actualizarRelacion(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID relacionId = UUID.fromString(
+                datos.get("relacionId").asString()
+        );
+
+        String tipo = datos.get("tipo").asString().trim();
+        String multiplicidadOrigen =
+                obtenerTextoOpcional(datos, "multiplicidadOrigen");
+        String multiplicidadDestino =
+                obtenerTextoOpcional(datos, "multiplicidadDestino");
+        String nombre =
+                obtenerTextoOpcional(datos, "nombre");
+
+        validarRelacion(
+                tipo,
+                multiplicidadOrigen,
+                multiplicidadDestino,
+                nombre
+        );
+
+        ModeloDiagrama modelo = obtenerModeloDeSesion(sesion);
+
+        List<String> clavesBloqueo = List.of(
+                "MODELO:" + modelo.getId() + ":RELACIONES",
+                "RELACION:" + relacionId
+        );
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                RelacionDiagrama relacion =
+                                        obtenerRelacionDeSesion(
+                                                relacionId,
+                                                modelo.getId(),
+                                                sesion
+                                        );
+
+                                int filasRelacion =
+                                        relacionDiagramaRepository
+                                                .actualizarRelacion(
+                                                        relacion.getId(),
+                                                        modelo.getId(),
+                                                        tipo,
+                                                        multiplicidadOrigen,
+                                                        multiplicidadDestino,
+                                                        nombre
+                                                );
+
+                                if (filasRelacion != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo actualizar la relación UML"
+                                    );
+                                }
+
+                                incrementarVersionModelo(
+                                        modelo.getId()
+                                );
+
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private OperacionColaborativaResponse eliminarRelacion(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID relacionId = UUID.fromString(
+                datos.get("relacionId").asString()
+        );
+
+        ModeloDiagrama modelo = obtenerModeloDeSesion(sesion);
+
+        List<String> clavesBloqueo = List.of(
+                "MODELO:" + modelo.getId() + ":RELACIONES",
+                "RELACION:" + relacionId
+        );
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                obtenerRelacionDeSesion(
+                                        relacionId,
+                                        modelo.getId(),
+                                        sesion
+                                );
+
+                                int filasRelacion =
+                                        relacionDiagramaRepository
+                                                .eliminarPorIdYModeloId(
+                                                        relacionId,
+                                                        modelo.getId()
+                                                );
+
+                                if (filasRelacion != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo eliminar la relación UML"
+                                    );
+                                }
+
+                                incrementarVersionModelo(
+                                        modelo.getId()
+                                );
+
+                                return construirRespuestaActualizada(
+                                        sesion,
+                                        solicitud
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private RelacionDiagrama obtenerRelacionDeSesion(
+            UUID relacionId,
+            UUID modeloId,
+            SesionColaborativaResponse sesion
+    ) {
+
+        RelacionDiagrama relacion =
+                relacionDiagramaRepository
+                        .findById(relacionId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Relación UML no encontrada"
+                                )
+                        );
+
+        validarProyectoSesion(
+                relacion.getModelo(),
+                sesion
+        );
+
+        if (!relacion.getModelo()
+                .getId()
+                .equals(modeloId)) {
+
+            throw new IllegalStateException(
+                    "La relación no pertenece al modelo de la sesión"
+            );
+        }
+
+        return relacion;
+    }
+
+    private String obtenerTextoOpcional(
+            JsonNode datos,
+            String campo
+    ) {
+
+        JsonNode valor = datos.get(campo);
+
+        if (valor == null || valor.isNull()) {
+            return null;
+        }
+
+        String texto = valor.asString().trim();
+
+        return texto.isBlank()
+                ? null
+                : texto;
+    }
+
+    private void validarRelacion(
+            String tipo,
+            String multiplicidadOrigen,
+            String multiplicidadDestino,
+            String nombre
+    ) {
+
+        if (tipo.isBlank()) {
+            throw new IllegalStateException(
+                    "El tipo de relación es obligatorio"
+            );
+        }
+
+        if (tipo.length() > 30) {
+            throw new IllegalStateException(
+                    "El tipo de relación no puede superar 30 caracteres"
+            );
+        }
+
+        if (multiplicidadOrigen != null
+                && multiplicidadOrigen.length() > 20) {
+
+            throw new IllegalStateException(
+                    "La multiplicidad de origen no puede superar 20 caracteres"
+            );
+        }
+
+        if (multiplicidadDestino != null
+                && multiplicidadDestino.length() > 20) {
+
+            throw new IllegalStateException(
+                    "La multiplicidad de destino no puede superar 20 caracteres"
+            );
+        }
+
+        if (nombre != null && nombre.length() > 100) {
+            throw new IllegalStateException(
+                    "El nombre de la relación no puede superar 100 caracteres"
+            );
+        }
     }
 
     private ModeloDiagrama obtenerModeloDeSesion(

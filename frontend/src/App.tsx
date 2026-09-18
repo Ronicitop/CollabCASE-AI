@@ -2,12 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   Background,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   MarkerType,
   MiniMap,
   ReactFlow,
+  getBezierPath,
   useNodesState,
   type Edge,
+  type EdgeProps,
   type Node,
 } from '@xyflow/react'
 
@@ -89,6 +93,143 @@ type OperacionColaborativaResponse = {
   modelo: ModeloCompleto
 }
 
+type DatosRelacionEdge = {
+  nombre: string
+  multiplicidadOrigen: string
+  multiplicidadDestino: string
+}
+
+const estiloEtiquetaRelacion = {
+  position: 'absolute' as const,
+  transform: 'translate(-50%, -50%)',
+  background: 'rgba(255, 255, 255, 0.94)',
+  padding: '2px 5px',
+  borderRadius: 4,
+  fontSize: 13,
+  lineHeight: 1.2,
+  whiteSpace: 'nowrap' as const,
+  pointerEvents: 'none' as const,
+  userSelect: 'none' as const,
+}
+
+function RelacionUmlEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps) {
+  const [ruta, centroX, centroY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
+
+  const datos = data as DatosRelacionEdge | undefined
+
+  const deltaX = targetX - sourceX
+  const deltaY = targetY - sourceY
+  const longitud = Math.hypot(deltaX, deltaY) || 1
+
+  const direccionX = deltaX / longitud
+  const direccionY = deltaY / longitud
+
+  // Vector perpendicular a la relación. Sirve para separar el texto
+  // ligeramente de la línea, como en herramientas UML tradicionales.
+  const perpendicularX = -direccionY
+  const perpendicularY = direccionX
+
+  // Las cardinalidades quedan cerca de cada extremo, no en el centro.
+  const distanciaDesdeClase = 28
+  const separacionDeLinea = 14
+
+  const origenX =
+    sourceX +
+    direccionX * distanciaDesdeClase +
+    perpendicularX * separacionDeLinea
+
+  const origenY =
+    sourceY +
+    direccionY * distanciaDesdeClase +
+    perpendicularY * separacionDeLinea
+
+  const destinoX =
+    targetX -
+    direccionX * distanciaDesdeClase +
+    perpendicularX * separacionDeLinea
+
+  const destinoY =
+    targetY -
+    direccionY * distanciaDesdeClase +
+    perpendicularY * separacionDeLinea
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={ruta}
+        markerEnd={markerEnd}
+        style={style}
+      />
+
+      <EdgeLabelRenderer>
+        {datos?.multiplicidadOrigen && (
+          <div
+            className="nodrag nopan"
+            style={{
+              ...estiloEtiquetaRelacion,
+              left: origenX,
+              top: origenY,
+              fontWeight: 600,
+            }}
+          >
+            {datos.multiplicidadOrigen}
+          </div>
+        )}
+
+        {datos?.multiplicidadDestino && (
+          <div
+            className="nodrag nopan"
+            style={{
+              ...estiloEtiquetaRelacion,
+              left: destinoX,
+              top: destinoY,
+              fontWeight: 600,
+            }}
+          >
+            {datos.multiplicidadDestino}
+          </div>
+        )}
+
+        {datos?.nombre && (
+          <div
+            className="nodrag nopan"
+            style={{
+              ...estiloEtiquetaRelacion,
+              left: centroX,
+              top: centroY,
+              fontSize: 12,
+            }}
+          >
+            {datos.nombre}
+          </div>
+        )}
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
+const tiposArista = {
+  relacionUml: RelacionUmlEdge,
+}
 
 const construirNodos = (modelo: ModeloCompleto): Node[] => {
   return modelo.clases.map((clase) => ({
@@ -128,7 +269,12 @@ const construirAristas = (modelo: ModeloCompleto): Edge[] => {
     id: relacion.id,
     source: relacion.claseOrigenId,
     target: relacion.claseDestinoId,
-    label: relacion.nombre ?? relacion.tipo,
+    type: 'relacionUml',
+    data: {
+      nombre: relacion.nombre?.trim() || relacion.tipo,
+      multiplicidadOrigen: relacion.multiplicidadOrigen ?? '',
+      multiplicidadDestino: relacion.multiplicidadDestino ?? '',
+    },
     markerEnd: {
       type: MarkerType.ArrowClosed,
     },
@@ -1401,6 +1547,59 @@ function App() {
       setErrorRelacion('')
       setErrorGuardado('')
 
+      if (sesionColaborativa) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de guardar una relación.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo:
+              relacionEditandoId === null
+                ? 'CREAR_RELACION'
+                : 'ACTUALIZAR_RELACION',
+            datos:
+              relacionEditandoId === null
+                ? {
+                    claseOrigenId: claseOrigenRelacion,
+                    claseDestinoId: claseDestinoRelacion,
+                    tipo: tipoLimpio,
+                    multiplicidadOrigen:
+                      multiplicidadOrigenRelacion.trim() || null,
+                    multiplicidadDestino:
+                      multiplicidadDestinoRelacion.trim() || null,
+                    nombre: nombreRelacion.trim() || null,
+                  }
+                : {
+                    relacionId: relacionEditandoId,
+                    tipo: tipoLimpio,
+                    multiplicidadOrigen:
+                      multiplicidadOrigenRelacion.trim() || null,
+                    multiplicidadDestino:
+                      multiplicidadDestinoRelacion.trim() || null,
+                    nombre: nombreRelacion.trim() || null,
+                  },
+          }),
+        })
+
+        setRelacionEditandoId(null)
+        setClaseOrigenRelacion('')
+        setClaseDestinoRelacion('')
+        setTipoRelacion('ASOCIACION')
+        setMultiplicidadOrigenRelacion('1')
+        setMultiplicidadDestinoRelacion('*')
+        setNombreRelacion('')
+        setMostrarFormularioRelacion(false)
+        return
+      }
+
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
       )
@@ -1540,6 +1739,41 @@ function App() {
       setEliminandoRelacionId(relacion.id)
       setErrorRelacion('')
       setErrorGuardado('')
+
+      if (sesionColaborativa) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de eliminar una relación.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo: 'ELIMINAR_RELACION',
+            datos: {
+              relacionId: relacion.id,
+            },
+          }),
+        })
+
+        if (relacionEditandoId === relacion.id) {
+          setRelacionEditandoId(null)
+          setClaseOrigenRelacion('')
+          setClaseDestinoRelacion('')
+          setTipoRelacion('ASOCIACION')
+          setMultiplicidadOrigenRelacion('1')
+          setMultiplicidadDestinoRelacion('*')
+          setNombreRelacion('')
+          setMostrarFormularioRelacion(false)
+        }
+
+        return
+      }
 
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
@@ -2304,6 +2538,7 @@ function App() {
               <ReactFlow
                 nodes={nodos}
                 edges={aristas}
+                edgeTypes={tiposArista}
                 onNodesChange={onNodesChange}
                 onEdgeClick={(_, arista) => {
                   const relacion = modeloAbierto.relaciones.find(
