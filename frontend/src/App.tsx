@@ -126,6 +126,8 @@ function App() {
   const [nombreClase, setNombreClase] = useState('')
   const [creandoClase, setCreandoClase] = useState(false)
   const [errorClase, setErrorClase] = useState('')
+  const [claseEditandoId, setClaseEditandoId] = useState<string | null>(null)
+  const [eliminandoClaseId, setEliminandoClaseId] = useState<string | null>(null)
 
   const [claseSeleccionadaId, setClaseSeleccionadaId] = useState<string | null>(null)
   const [mostrarFormularioAtributo, setMostrarFormularioAtributo] = useState(false)
@@ -368,7 +370,7 @@ function App() {
     }
   }
 
-  const crearClase = async (evento: FormEvent<HTMLFormElement>) => {
+  const guardarClase = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault()
 
     if (!proyectoAbierto || !modeloAbierto) {
@@ -379,6 +381,17 @@ function App() {
 
     if (!nombreLimpio) {
       setErrorClase('El nombre de la clase es obligatorio.')
+      return
+    }
+
+    const nombreDuplicado = modeloAbierto.clases.some(
+      (clase) =>
+        clase.id !== claseEditandoId &&
+        clase.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase(),
+    )
+
+    if (nombreDuplicado) {
+      setErrorClase('Ya existe una clase con ese nombre en el modelo.')
       return
     }
 
@@ -397,38 +410,44 @@ function App() {
 
       const claveNuevaClase = `nueva-${crypto.randomUUID()}`
 
-      const solicitud = {
-        clases: [
-          ...modeloAbierto.clases.map((clase) => {
-            const posicion = posicionesPorId.get(clase.id) ?? {
-              x: clase.posicionX,
-              y: clase.posicionY,
-            }
+      const clasesExistentes = modeloAbierto.clases.map((clase) => {
+        const posicion = posicionesPorId.get(clase.id) ?? {
+          x: clase.posicionX,
+          y: clase.posicionY,
+        }
 
-            return {
-              id: clase.id,
-              claveCliente: clase.id,
-              nombre: clase.nombre,
-              posicionX: posicion.x,
-              posicionY: posicion.y,
-              atributos: clase.atributos.map((atributo) => ({
-                id: atributo.id,
-                nombre: atributo.nombre,
-                tipoDato: atributo.tipoDato,
-                permiteNulo: atributo.permiteNulo,
-                identificador: atributo.identificador,
-              })),
-            }
-          }),
-          {
-            id: null,
-            claveCliente: claveNuevaClase,
-            nombre: nombreLimpio,
-            posicionX: 80 + columna * 280,
-            posicionY: 80 + fila * 180,
-            atributos: [],
-          },
-        ],
+        return {
+          id: clase.id,
+          claveCliente: clase.id,
+          nombre:
+            clase.id === claseEditandoId ? nombreLimpio : clase.nombre,
+          posicionX: posicion.x,
+          posicionY: posicion.y,
+          atributos: clase.atributos.map((atributo) => ({
+            id: atributo.id,
+            nombre: atributo.nombre,
+            tipoDato: atributo.tipoDato,
+            permiteNulo: atributo.permiteNulo,
+            identificador: atributo.identificador,
+          })),
+        }
+      })
+
+      const solicitud = {
+        clases:
+          claseEditandoId === null
+            ? [
+                ...clasesExistentes,
+                {
+                  id: null,
+                  claveCliente: claveNuevaClase,
+                  nombre: nombreLimpio,
+                  posicionX: 80 + columna * 280,
+                  posicionY: 80 + fila * 180,
+                  atributos: [],
+                },
+              ]
+            : clasesExistentes,
 
         relaciones: modeloAbierto.relaciones.map((relacion) => ({
           id: relacion.id,
@@ -453,7 +472,10 @@ function App() {
       )
 
       if (!respuesta.ok) {
-        let mensaje = 'No se pudo crear la clase UML'
+        let mensaje =
+          claseEditandoId === null
+            ? 'No se pudo crear la clase UML'
+            : 'No se pudo actualizar la clase UML'
 
         try {
           const detalle = await respuesta.json()
@@ -472,20 +494,158 @@ function App() {
 
       setModeloAbierto(modeloActualizado)
       setNombreClase('')
+      setClaseEditandoId(null)
       setMostrarFormularioClase(false)
     } catch (error) {
       if (error instanceof Error) {
         setErrorClase(error.message)
       } else {
-        setErrorClase('Ocurrió un error al crear la clase UML')
+        setErrorClase('Ocurrió un error al guardar la clase UML')
       }
     } finally {
       setCreandoClase(false)
     }
   }
 
+  const editarClase = (clase: ClaseDiagrama) => {
+    setClaseEditandoId(clase.id)
+    setNombreClase(clase.nombre)
+    setErrorClase('')
+    setMostrarFormularioClase(true)
+  }
+
+  const eliminarClase = async (clase: ClaseDiagrama) => {
+    if (!proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    const relacionesAfectadas = modeloAbierto.relaciones.filter(
+      (relacion) =>
+        relacion.claseOrigenId === clase.id ||
+        relacion.claseDestinoId === clase.id,
+    ).length
+
+    const mensajeConfirmacion =
+      relacionesAfectadas > 0
+        ? `¿Eliminar la clase "${clase.nombre}"? También se eliminarán ${relacionesAfectadas} relación(es) asociada(s).`
+        : `¿Eliminar la clase "${clase.nombre}"?`
+
+    if (!window.confirm(mensajeConfirmacion)) {
+      return
+    }
+
+    try {
+      setEliminandoClaseId(clase.id)
+      setErrorClase('')
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      const solicitud = {
+        clases: modeloAbierto.clases
+          .filter((claseActual) => claseActual.id !== clase.id)
+          .map((claseActual) => {
+            const posicion = posicionesPorId.get(claseActual.id) ?? {
+              x: claseActual.posicionX,
+              y: claseActual.posicionY,
+            }
+
+            return {
+              id: claseActual.id,
+              claveCliente: claseActual.id,
+              nombre: claseActual.nombre,
+              posicionX: posicion.x,
+              posicionY: posicion.y,
+              atributos: claseActual.atributos.map((atributo) => ({
+                id: atributo.id,
+                nombre: atributo.nombre,
+                tipoDato: atributo.tipoDato,
+                permiteNulo: atributo.permiteNulo,
+                identificador: atributo.identificador,
+              })),
+            }
+          }),
+
+        relaciones: modeloAbierto.relaciones
+          .filter(
+            (relacion) =>
+              relacion.claseOrigenId !== clase.id &&
+              relacion.claseDestinoId !== clase.id,
+          )
+          .map((relacion) => ({
+            id: relacion.id,
+            claseOrigenClave: relacion.claseOrigenId,
+            claseDestinoClave: relacion.claseDestinoId,
+            tipo: relacion.tipo,
+            multiplicidadOrigen: relacion.multiplicidadOrigen,
+            multiplicidadDestino: relacion.multiplicidadDestino,
+            nombre: relacion.nombre,
+          })),
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje = 'No se pudo eliminar la clase UML'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general si la respuesta no contiene JSON.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+
+      if (claseSeleccionadaId === clase.id) {
+        setClaseSeleccionadaId(null)
+        setMostrarFormularioAtributo(false)
+        setAtributoEditandoId(null)
+        setNombreAtributo('')
+        setTipoDatoAtributo('')
+        setPermiteNuloAtributo(false)
+        setIdentificadorAtributo(false)
+        setErrorAtributo('')
+      }
+
+      if (claseEditandoId === clase.id) {
+        setClaseEditandoId(null)
+        setNombreClase('')
+        setMostrarFormularioClase(false)
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorClase(error.message)
+      } else {
+        setErrorClase('Ocurrió un error al eliminar la clase UML')
+      }
+    } finally {
+      setEliminandoClaseId(null)
+    }
+  }
+
   const cancelarCreacionClase = () => {
     setNombreClase('')
+    setClaseEditandoId(null)
     setErrorClase('')
     setMostrarFormularioClase(false)
   }
@@ -800,6 +960,8 @@ function App() {
     setErrorGuardado('')
     setMostrarFormularioClase(false)
     setNombreClase('')
+    setClaseEditandoId(null)
+    setEliminandoClaseId(null)
     setErrorClase('')
     setClaseSeleccionadaId(null)
     setMostrarFormularioAtributo(false)
@@ -858,17 +1020,23 @@ function App() {
                 className="boton-nueva-clase"
                 type="button"
                 onClick={() => {
+                  setClaseEditandoId(null)
+                  setNombreClase('')
                   setErrorClase('')
                   setMostrarFormularioClase(true)
                 }}
-                disabled={creandoClase || guardandoModelo}
+                disabled={
+                  creandoClase ||
+                  guardandoModelo ||
+                  eliminandoClaseId !== null
+                }
               >
                 + Nueva clase
               </button>
             </div>
 
             {mostrarFormularioClase && (
-              <form className="formulario-clase" onSubmit={crearClase}>
+              <form className="formulario-clase" onSubmit={guardarClase}>
                 <div className="campo">
                   <label htmlFor="nombreClase">Nombre de la clase</label>
 
@@ -902,7 +1070,11 @@ function App() {
                     type="submit"
                     disabled={creandoClase}
                   >
-                    {creandoClase ? 'Creando...' : 'Crear clase'}
+                    {creandoClase
+                      ? 'Guardando...'
+                      : claseEditandoId
+                        ? 'Guardar cambios'
+                        : 'Crear clase'}
                   </button>
                 </div>
               </form>
@@ -919,24 +1091,59 @@ function App() {
                       </p>
                     </div>
 
-                    <button
-                      className="boton-nuevo-atributo"
-                      type="button"
-                      onClick={() => {
-                        setAtributoEditandoId(null)
-                        setNombreAtributo('')
-                        setTipoDatoAtributo('')
-                        setPermiteNuloAtributo(false)
-                        setIdentificadorAtributo(false)
-                        setErrorAtributo('')
-                        setMostrarFormularioAtributo(true)
-                      }}
-                      disabled={
-                        creandoAtributo || creandoClase || guardandoModelo
-                      }
-                    >
-                      + Atributo
-                    </button>
+                    <div className="acciones-clase">
+                      <button
+                        className="boton-editar-clase"
+                        type="button"
+                        onClick={() => editarClase(claseSeleccionada)}
+                        disabled={
+                          creandoClase ||
+                          creandoAtributo ||
+                          guardandoModelo ||
+                          eliminandoClaseId !== null
+                        }
+                      >
+                        Editar clase
+                      </button>
+
+                      <button
+                        className="boton-eliminar-clase"
+                        type="button"
+                        onClick={() => eliminarClase(claseSeleccionada)}
+                        disabled={
+                          creandoClase ||
+                          creandoAtributo ||
+                          guardandoModelo ||
+                          eliminandoClaseId !== null
+                        }
+                      >
+                        {eliminandoClaseId === claseSeleccionada.id
+                          ? 'Eliminando...'
+                          : 'Eliminar clase'}
+                      </button>
+
+                      <button
+                        className="boton-nuevo-atributo"
+                        type="button"
+                        onClick={() => {
+                          setAtributoEditandoId(null)
+                          setNombreAtributo('')
+                          setTipoDatoAtributo('')
+                          setPermiteNuloAtributo(false)
+                          setIdentificadorAtributo(false)
+                          setErrorAtributo('')
+                          setMostrarFormularioAtributo(true)
+                        }}
+                        disabled={
+                          creandoAtributo ||
+                          creandoClase ||
+                          guardandoModelo ||
+                          eliminandoClaseId !== null
+                        }
+                      >
+                        + Atributo
+                      </button>
+                    </div>
                   </div>
 
                   {claseSeleccionada.atributos.length > 0 && (
@@ -1107,7 +1314,12 @@ function App() {
                 onNodeClick={(_, nodo) => {
                   setClaseSeleccionadaId(nodo.id)
                   setMostrarFormularioAtributo(false)
+                  setAtributoEditandoId(null)
                   setErrorAtributo('')
+                  setMostrarFormularioClase(false)
+                  setClaseEditandoId(null)
+                  setNombreClase('')
+                  setErrorClase('')
                 }}
                 onNodeDragStop={(_, nodo) => guardarPosicionNodo(nodo)}
                 fitView
@@ -1115,7 +1327,8 @@ function App() {
                   !guardandoModelo &&
                   !creandoClase &&
                   !creandoAtributo &&
-                  eliminandoAtributoId === null
+                  eliminandoAtributoId === null &&
+                  eliminandoClaseId === null
                 }
                 nodesConnectable={false}
               >
