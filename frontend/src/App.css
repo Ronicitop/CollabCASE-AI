@@ -428,3 +428,78 @@ body {
   margin: 0;
   color: #6b7280;
 }
+
+.lista-atributos-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.fila-atributo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.info-atributo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.info-atributo span {
+  color: #6b7280;
+}
+
+.etiqueta-atributo {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #374151 !important;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.acciones-atributo {
+  display: flex;
+  gap: 8px;
+}
+
+.boton-editar-atributo,
+.boton-eliminar-atributo {
+  border: none;
+  border-radius: 7px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.boton-editar-atributo {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.boton-editar-atributo:hover {
+  background: #d1d5db;
+}
+
+.boton-eliminar-atributo {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.boton-eliminar-atributo:hover {
+  background: #fecaca;
+}
+
+.boton-editar-atributo:disabled,
+.boton-eliminar-atributo:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

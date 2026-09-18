@@ -135,6 +135,8 @@ function App() {
   const [identificadorAtributo, setIdentificadorAtributo] = useState(false)
   const [creandoAtributo, setCreandoAtributo] = useState(false)
   const [errorAtributo, setErrorAtributo] = useState('')
+  const [atributoEditandoId, setAtributoEditandoId] = useState<string | null>(null)
+  const [eliminandoAtributoId, setEliminandoAtributoId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('http://localhost:8080/api/proyectos')
@@ -488,7 +490,7 @@ function App() {
     setMostrarFormularioClase(false)
   }
 
-  const crearAtributo = async (evento: FormEvent<HTMLFormElement>) => {
+  const guardarAtributo = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault()
 
     if (!proyectoAbierto || !modeloAbierto || !claseSeleccionadaId) {
@@ -519,6 +521,7 @@ function App() {
 
     const nombreDuplicado = claseSeleccionada.atributos.some(
       (atributo) =>
+        atributo.id !== atributoEditandoId &&
         atributo.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase(),
     )
 
@@ -543,26 +546,47 @@ function App() {
             y: clase.posicionY,
           }
 
-          const atributos = [
-            ...clase.atributos.map((atributo) => ({
-              id: atributo.id as string | null,
+          const atributos: Array<{
+            id: string | null
+            nombre: string
+            tipoDato: string
+            permiteNulo: boolean
+            identificador: boolean
+          }> = clase.atributos.map((atributo) => {
+            if (
+              clase.id === claseSeleccionadaId &&
+              atributo.id === atributoEditandoId
+            ) {
+              return {
+                id: atributo.id,
+                nombre: nombreLimpio,
+                tipoDato: tipoDatoLimpio,
+                permiteNulo: permiteNuloAtributo,
+                identificador: identificadorAtributo,
+              }
+            }
+
+            return {
+              id: atributo.id,
               nombre: atributo.nombre,
               tipoDato: atributo.tipoDato,
               permiteNulo: atributo.permiteNulo,
               identificador: atributo.identificador,
-            })),
-            ...(clase.id === claseSeleccionadaId
-              ? [
-                  {
-                    id: null,
-                    nombre: nombreLimpio,
-                    tipoDato: tipoDatoLimpio,
-                    permiteNulo: permiteNuloAtributo,
-                    identificador: identificadorAtributo,
-                  },
-                ]
-              : []),
-          ]
+            }
+          })
+
+          if (
+            clase.id === claseSeleccionadaId &&
+            atributoEditandoId === null
+          ) {
+            atributos.push({
+              id: null,
+              nombre: nombreLimpio,
+              tipoDato: tipoDatoLimpio,
+              permiteNulo: permiteNuloAtributo,
+              identificador: identificadorAtributo,
+            })
+          }
 
           return {
             id: clase.id,
@@ -597,7 +621,10 @@ function App() {
       )
 
       if (!respuesta.ok) {
-        let mensaje = 'No se pudo crear el atributo UML'
+        let mensaje =
+          atributoEditandoId === null
+            ? 'No se pudo crear el atributo UML'
+            : 'No se pudo actualizar el atributo UML'
 
         try {
           const detalle = await respuesta.json()
@@ -619,15 +646,140 @@ function App() {
       setTipoDatoAtributo('')
       setPermiteNuloAtributo(false)
       setIdentificadorAtributo(false)
+      setAtributoEditandoId(null)
       setMostrarFormularioAtributo(false)
     } catch (error) {
       if (error instanceof Error) {
         setErrorAtributo(error.message)
       } else {
-        setErrorAtributo('Ocurrió un error al crear el atributo UML')
+        setErrorAtributo('Ocurrió un error al guardar el atributo UML')
       }
     } finally {
       setCreandoAtributo(false)
+    }
+  }
+
+  const editarAtributo = (atributo: AtributoDiagrama) => {
+    setAtributoEditandoId(atributo.id)
+    setNombreAtributo(atributo.nombre)
+    setTipoDatoAtributo(atributo.tipoDato)
+    setPermiteNuloAtributo(atributo.permiteNulo)
+    setIdentificadorAtributo(atributo.identificador)
+    setErrorAtributo('')
+    setMostrarFormularioAtributo(true)
+  }
+
+  const eliminarAtributo = async (atributo: AtributoDiagrama) => {
+    if (!proyectoAbierto || !modeloAbierto || !claseSeleccionadaId) {
+      return
+    }
+
+    const confirmar = window.confirm(
+      `¿Eliminar el atributo "${atributo.nombre}"?`,
+    )
+
+    if (!confirmar) {
+      return
+    }
+
+    try {
+      setEliminandoAtributoId(atributo.id)
+      setErrorAtributo('')
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      const solicitud = {
+        clases: modeloAbierto.clases.map((clase) => {
+          const posicion = posicionesPorId.get(clase.id) ?? {
+            x: clase.posicionX,
+            y: clase.posicionY,
+          }
+
+          return {
+            id: clase.id,
+            claveCliente: clase.id,
+            nombre: clase.nombre,
+            posicionX: posicion.x,
+            posicionY: posicion.y,
+            atributos: clase.atributos
+              .filter(
+                (atributoActual) =>
+                  !(
+                    clase.id === claseSeleccionadaId &&
+                    atributoActual.id === atributo.id
+                  ),
+              )
+              .map((atributoActual) => ({
+                id: atributoActual.id,
+                nombre: atributoActual.nombre,
+                tipoDato: atributoActual.tipoDato,
+                permiteNulo: atributoActual.permiteNulo,
+                identificador: atributoActual.identificador,
+              })),
+          }
+        }),
+
+        relaciones: modeloAbierto.relaciones.map((relacion) => ({
+          id: relacion.id,
+          claseOrigenClave: relacion.claseOrigenId,
+          claseDestinoClave: relacion.claseDestinoId,
+          tipo: relacion.tipo,
+          multiplicidadOrigen: relacion.multiplicidadOrigen,
+          multiplicidadDestino: relacion.multiplicidadDestino,
+          nombre: relacion.nombre,
+        })),
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje = 'No se pudo eliminar el atributo UML'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general si la respuesta no contiene JSON.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+
+      if (atributoEditandoId === atributo.id) {
+        setNombreAtributo('')
+        setTipoDatoAtributo('')
+        setPermiteNuloAtributo(false)
+        setIdentificadorAtributo(false)
+        setAtributoEditandoId(null)
+        setMostrarFormularioAtributo(false)
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorAtributo(error.message)
+      } else {
+        setErrorAtributo('Ocurrió un error al eliminar el atributo UML')
+      }
+    } finally {
+      setEliminandoAtributoId(null)
     }
   }
 
@@ -636,6 +788,7 @@ function App() {
     setTipoDatoAtributo('')
     setPermiteNuloAtributo(false)
     setIdentificadorAtributo(false)
+    setAtributoEditandoId(null)
     setErrorAtributo('')
     setMostrarFormularioAtributo(false)
   }
@@ -654,6 +807,8 @@ function App() {
     setTipoDatoAtributo('')
     setPermiteNuloAtributo(false)
     setIdentificadorAtributo(false)
+    setAtributoEditandoId(null)
+    setEliminandoAtributoId(null)
     setErrorAtributo('')
   }
 
@@ -768,6 +923,11 @@ function App() {
                       className="boton-nuevo-atributo"
                       type="button"
                       onClick={() => {
+                        setAtributoEditandoId(null)
+                        setNombreAtributo('')
+                        setTipoDatoAtributo('')
+                        setPermiteNuloAtributo(false)
+                        setIdentificadorAtributo(false)
                         setErrorAtributo('')
                         setMostrarFormularioAtributo(true)
                       }}
@@ -779,10 +939,61 @@ function App() {
                     </button>
                   </div>
 
+                  {claseSeleccionada.atributos.length > 0 && (
+                    <div className="lista-atributos-panel">
+                      {claseSeleccionada.atributos.map((atributo) => (
+                        <div className="fila-atributo" key={atributo.id}>
+                          <div className="info-atributo">
+                            <strong>{atributo.nombre}</strong>
+                            <span>{atributo.tipoDato}</span>
+                            {atributo.identificador && (
+                              <span className="etiqueta-atributo">
+                                Identificador
+                              </span>
+                            )}
+                            {atributo.permiteNulo && (
+                              <span className="etiqueta-atributo">
+                                Permite nulo
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="acciones-atributo">
+                            <button
+                              className="boton-editar-atributo"
+                              type="button"
+                              onClick={() => editarAtributo(atributo)}
+                              disabled={
+                                creandoAtributo ||
+                                eliminandoAtributoId !== null
+                              }
+                            >
+                              Editar
+                            </button>
+
+                            <button
+                              className="boton-eliminar-atributo"
+                              type="button"
+                              onClick={() => eliminarAtributo(atributo)}
+                              disabled={
+                                creandoAtributo ||
+                                eliminandoAtributoId !== null
+                              }
+                            >
+                              {eliminandoAtributoId === atributo.id
+                                ? 'Eliminando...'
+                                : 'Eliminar'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {mostrarFormularioAtributo && (
                     <form
                       className="formulario-atributo"
-                      onSubmit={crearAtributo}
+                      onSubmit={guardarAtributo}
                     >
                       <div className="campo">
                         <label htmlFor="nombreAtributo">Nombre</label>
@@ -859,8 +1070,10 @@ function App() {
                           disabled={creandoAtributo}
                         >
                           {creandoAtributo
-                            ? 'Creando...'
-                            : 'Crear atributo'}
+                            ? 'Guardando...'
+                            : atributoEditandoId
+                              ? 'Guardar cambios'
+                              : 'Crear atributo'}
                         </button>
                       </div>
                     </form>
@@ -899,7 +1112,10 @@ function App() {
                 onNodeDragStop={(_, nodo) => guardarPosicionNodo(nodo)}
                 fitView
                 nodesDraggable={
-                  !guardandoModelo && !creandoClase && !creandoAtributo
+                  !guardandoModelo &&
+                  !creandoClase &&
+                  !creandoAtributo &&
+                  eliminandoAtributoId === null
                 }
                 nodesConnectable={false}
               >
