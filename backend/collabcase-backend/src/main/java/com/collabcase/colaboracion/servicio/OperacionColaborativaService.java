@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -41,6 +42,9 @@ public class OperacionColaborativaService {
         return switch (solicitud.tipo()) {
             case MOVER_CLASE ->
                     moverClase(sesion, solicitud);
+
+            case CREAR_CLASE ->
+                    crearClase(sesion, solicitud);
 
             case RENOMBRAR_CLASE ->
                     renombrarClase(sesion, solicitud);
@@ -123,6 +127,85 @@ public class OperacionColaborativaService {
         );
     }
 
+    private OperacionColaborativaResponse crearClase(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        String nombre = datos.get("nombre").asText().trim();
+        double posicionX = datos.get("posicionX").asDouble();
+        double posicionY = datos.get("posicionY").asDouble();
+
+        validarNombreClase(nombre);
+
+        ModeloDiagrama modelo = modeloDiagramaRepository
+                .findByProyectoId(sesion.proyectoId())
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Modelo UML no encontrado"
+                        )
+                );
+
+        String nombreNormalizado =
+                nombre.toLowerCase(Locale.ROOT);
+
+        String claveBloqueo =
+                "MODELO:"
+                        + modelo.getId()
+                        + ":NOMBRE_CLASE:"
+                        + nombreNormalizado;
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueo(
+                claveBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                boolean nombreDuplicado =
+                                        claseDiagramaRepository
+                                                .existsByModeloIdAndNombreIgnoreCase(
+                                                        modelo.getId(),
+                                                        nombre
+                                                );
+
+                                if (nombreDuplicado) {
+                                    throw new IllegalStateException(
+                                            "Ya existe una clase con ese nombre en el modelo"
+                                    );
+                                }
+
+                                ClaseDiagrama nuevaClase =
+                                        ClaseDiagrama.builder()
+                                                .modelo(modelo)
+                                                .nombre(nombre)
+                                                .posicionX(posicionX)
+                                                .posicionY(posicionY)
+                                                .build();
+
+                                claseDiagramaRepository.saveAndFlush(
+                                        nuevaClase
+                                );
+
+                                incrementarVersionModelo(modelo.getId());
+
+                                ModeloCompletoResponse modeloActualizado =
+                                        modeloDiagramaService.obtenerModeloCompleto(
+                                                sesion.proyectoId()
+                                        );
+
+                                return construirRespuesta(
+                                        solicitud,
+                                        modeloActualizado
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
     private OperacionColaborativaResponse renombrarClase(
             SesionColaborativaResponse sesion,
             OperacionColaborativaRequest solicitud
@@ -136,17 +219,7 @@ public class OperacionColaborativaService {
 
         String nombre = datos.get("nombre").asText().trim();
 
-        if (nombre.isBlank()) {
-            throw new IllegalStateException(
-                    "El nombre de la clase es obligatorio"
-            );
-        }
-
-        if (nombre.length() > 100) {
-            throw new IllegalStateException(
-                    "El nombre de la clase no puede superar 100 caracteres"
-            );
-        }
+        validarNombreClase(nombre);
 
         String claveBloqueo =
                 "CLASE:" + claseId + ":NOMBRE";
@@ -215,6 +288,21 @@ public class OperacionColaborativaService {
                     return validarRespuestaTransaccion(respuesta);
                 }
         );
+    }
+
+    private void validarNombreClase(String nombre) {
+
+        if (nombre.isBlank()) {
+            throw new IllegalStateException(
+                    "El nombre de la clase es obligatorio"
+            );
+        }
+
+        if (nombre.length() > 100) {
+            throw new IllegalStateException(
+                    "El nombre de la clase no puede superar 100 caracteres"
+            );
+        }
     }
 
     private void validarProyectoSesion(

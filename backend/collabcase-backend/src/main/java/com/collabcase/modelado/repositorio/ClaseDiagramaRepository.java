@@ -19,6 +19,11 @@ public interface ClaseDiagramaRepository extends JpaRepository<ClaseDiagrama, UU
             String nombre
     );
 
+    boolean existsByModeloIdAndNombreIgnoreCase(
+            UUID modeloId,
+            String nombre
+    );
+
     boolean existsByModeloIdAndNombreIgnoreCaseAndIdNot(
             UUID modeloId,
             String nombre,

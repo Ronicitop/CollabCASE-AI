@@ -749,6 +749,39 @@ function App() {
         return
       }
 
+      if (sesionColaborativa && claseEditandoId === null) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de crear una clase.',
+          )
+        }
+
+        const cantidadClases = modeloAbierto.clases.length
+        const columna = cantidadClases % 3
+        const fila = Math.floor(cantidadClases / 3)
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo: 'CREAR_CLASE',
+            datos: {
+              nombre: nombreLimpio,
+              posicionX: 80 + columna * 280,
+              posicionY: 80 + fila * 180,
+            },
+          }),
+        })
+
+        setNombreClase('')
+        setClaseEditandoId(null)
+        setMostrarFormularioClase(false)
+        return
+      }
+
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
       )
