@@ -12,7 +12,7 @@ import com.collabcase.modelado.repositorio.ModeloDiagramaRepository;
 import com.collabcase.modelado.servicio.ModeloDiagramaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 import java.util.UUID;
@@ -28,7 +28,8 @@ public class OperacionColaborativaService {
     private final ModeloDiagramaRepository modeloDiagramaRepository;
     private final ModeloDiagramaService modeloDiagramaService;
 
-    @Transactional
+    private final TransactionTemplate transactionTemplate;
+
     public OperacionColaborativaResponse aplicarOperacion(
             String codigoSesion,
             OperacionColaborativaRequest solicitud
@@ -37,14 +38,19 @@ public class OperacionColaborativaService {
         SesionColaborativaResponse sesion =
                 sesionColaborativaService.unirseSesion(codigoSesion);
 
-        if (solicitud.tipo() == TipoOperacionColaborativa.MOVER_CLASE) {
-            return moverClase(sesion, solicitud);
-        }
+        return switch (solicitud.tipo()) {
+            case MOVER_CLASE ->
+                    moverClase(sesion, solicitud);
 
-        throw new IllegalStateException(
-                "La operación colaborativa todavía no está implementada: "
-                        + solicitud.tipo()
-        );
+            case RENOMBRAR_CLASE ->
+                    renombrarClase(sesion, solicitud);
+
+            default ->
+                    throw new IllegalStateException(
+                            "La operación colaborativa todavía no está implementada: "
+                                    + solicitud.tipo()
+                    );
+        };
     }
 
     private OperacionColaborativaResponse moverClase(
@@ -67,47 +73,202 @@ public class OperacionColaborativaService {
         return gestorBloqueosColaborativos.ejecutarConBloqueo(
                 claveBloqueo,
                 () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
 
-                    ClaseDiagrama clase = claseDiagramaRepository
-                            .findById(claseId)
-                            .orElseThrow(() ->
-                                    new IllegalArgumentException(
-                                            "Clase UML no encontrada"
-                                    )
-                            );
+                                ClaseDiagrama clase = claseDiagramaRepository
+                                        .findById(claseId)
+                                        .orElseThrow(() ->
+                                                new IllegalArgumentException(
+                                                        "Clase UML no encontrada"
+                                                )
+                                        );
 
-                    ModeloDiagrama modelo = clase.getModelo();
+                                ModeloDiagrama modelo = clase.getModelo();
 
-                    if (!modelo.getProyecto()
-                            .getId()
-                            .equals(sesion.proyectoId())) {
+                                validarProyectoSesion(
+                                        modelo,
+                                        sesion
+                                );
 
-                        throw new IllegalStateException(
-                                "La clase no pertenece al proyecto de la sesión"
-                        );
-                    }
+                                int filasClase =
+                                        claseDiagramaRepository.actualizarPosicion(
+                                                claseId,
+                                                modelo.getId(),
+                                                posicionX,
+                                                posicionY
+                                        );
 
-                    clase.setPosicionX(posicionX);
-                    clase.setPosicionY(posicionY);
+                                if (filasClase != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo actualizar la posición de la clase UML"
+                                    );
+                                }
 
-                    claseDiagramaRepository.save(clase);
+                                incrementarVersionModelo(modelo.getId());
 
-                    modelo.setVersion(modelo.getVersion() + 1);
+                                ModeloCompletoResponse modeloActualizado =
+                                        modeloDiagramaService.obtenerModeloCompleto(
+                                                sesion.proyectoId()
+                                        );
 
-                    modeloDiagramaRepository.saveAndFlush(modelo);
+                                return construirRespuesta(
+                                        solicitud,
+                                        modeloActualizado
+                                );
+                            });
 
-                    ModeloCompletoResponse modeloActualizado =
-                            modeloDiagramaService.obtenerModeloCompleto(
-                                    sesion.proyectoId()
-                            );
-
-                    return new OperacionColaborativaResponse(
-                            solicitud.operacionId(),
-                            solicitud.clienteId(),
-                            solicitud.tipo(),
-                            modeloActualizado
-                    );
+                    return validarRespuestaTransaccion(respuesta);
                 }
         );
+    }
+
+    private OperacionColaborativaResponse renombrarClase(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID claseId = UUID.fromString(
+                datos.get("claseId").asText()
+        );
+
+        String nombre = datos.get("nombre").asText().trim();
+
+        if (nombre.isBlank()) {
+            throw new IllegalStateException(
+                    "El nombre de la clase es obligatorio"
+            );
+        }
+
+        if (nombre.length() > 100) {
+            throw new IllegalStateException(
+                    "El nombre de la clase no puede superar 100 caracteres"
+            );
+        }
+
+        String claveBloqueo =
+                "CLASE:" + claseId + ":NOMBRE";
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueo(
+                claveBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                ClaseDiagrama clase = claseDiagramaRepository
+                                        .findById(claseId)
+                                        .orElseThrow(() ->
+                                                new IllegalArgumentException(
+                                                        "Clase UML no encontrada"
+                                                )
+                                        );
+
+                                ModeloDiagrama modelo = clase.getModelo();
+
+                                validarProyectoSesion(
+                                        modelo,
+                                        sesion
+                                );
+
+                                boolean nombreDuplicado =
+                                        claseDiagramaRepository
+                                                .existsByModeloIdAndNombreIgnoreCaseAndIdNot(
+                                                        modelo.getId(),
+                                                        nombre,
+                                                        claseId
+                                                );
+
+                                if (nombreDuplicado) {
+                                    throw new IllegalStateException(
+                                            "Ya existe una clase con ese nombre en el modelo"
+                                    );
+                                }
+
+                                int filasClase =
+                                        claseDiagramaRepository.actualizarNombre(
+                                                claseId,
+                                                modelo.getId(),
+                                                nombre
+                                        );
+
+                                if (filasClase != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo actualizar el nombre de la clase UML"
+                                    );
+                                }
+
+                                incrementarVersionModelo(modelo.getId());
+
+                                ModeloCompletoResponse modeloActualizado =
+                                        modeloDiagramaService.obtenerModeloCompleto(
+                                                sesion.proyectoId()
+                                        );
+
+                                return construirRespuesta(
+                                        solicitud,
+                                        modeloActualizado
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private void validarProyectoSesion(
+            ModeloDiagrama modelo,
+            SesionColaborativaResponse sesion
+    ) {
+
+        if (!modelo.getProyecto()
+                .getId()
+                .equals(sesion.proyectoId())) {
+
+            throw new IllegalStateException(
+                    "La clase no pertenece al proyecto de la sesión"
+            );
+        }
+    }
+
+    private void incrementarVersionModelo(UUID modeloId) {
+
+        int filasModelo =
+                modeloDiagramaRepository.incrementarVersion(
+                        modeloId
+                );
+
+        if (filasModelo != 1) {
+            throw new IllegalStateException(
+                    "No se pudo actualizar la versión del modelo UML"
+            );
+        }
+    }
+
+    private OperacionColaborativaResponse construirRespuesta(
+            OperacionColaborativaRequest solicitud,
+            ModeloCompletoResponse modeloActualizado
+    ) {
+
+        return new OperacionColaborativaResponse(
+                solicitud.operacionId(),
+                solicitud.clienteId(),
+                solicitud.tipo(),
+                modeloActualizado
+        );
+    }
+
+    private OperacionColaborativaResponse validarRespuestaTransaccion(
+            OperacionColaborativaResponse respuesta
+    ) {
+
+        if (respuesta == null) {
+            throw new IllegalStateException(
+                    "No se pudo completar la operación colaborativa"
+            );
+        }
+
+        return respuesta;
     }
 }

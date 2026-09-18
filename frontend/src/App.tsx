@@ -721,6 +721,34 @@ function App() {
       setErrorClase('')
       setErrorGuardado('')
 
+      if (sesionColaborativa && claseEditandoId !== null) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de renombrar una clase.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo: 'RENOMBRAR_CLASE',
+            datos: {
+              claseId: claseEditandoId,
+              nombre: nombreLimpio,
+            },
+          }),
+        })
+
+        setNombreClase('')
+        setClaseEditandoId(null)
+        setMostrarFormularioClase(false)
+        return
+      }
+
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
       )
