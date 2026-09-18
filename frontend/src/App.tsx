@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import {
+  Background,
+  Controls,
+  MarkerType,
+  MiniMap,
+  ReactFlow,
+  type Edge,
+  type Node,
+} from '@xyflow/react'
+
+import '@xyflow/react/dist/style.css'
 import './App.css'
 
 type Proyecto = {
@@ -43,6 +54,52 @@ type ModeloCompleto = {
   actualizadoEn: string
   clases: ClaseDiagrama[]
   relaciones: RelacionDiagrama[]
+}
+
+
+const construirNodos = (modelo: ModeloCompleto): Node[] => {
+  return modelo.clases.map((clase) => ({
+    id: clase.id,
+    position: {
+      x: clase.posicionX,
+      y: clase.posicionY,
+    },
+    data: {
+      label: (
+        <div className="nodo-uml">
+          <div className="nodo-uml-titulo">{clase.nombre}</div>
+
+          <div className="nodo-uml-atributos">
+            {clase.atributos.length === 0 ? (
+              <span>Sin atributos</span>
+            ) : (
+              clase.atributos.map((atributo) => (
+                <div key={atributo.id}>
+                  {atributo.identificador ? '🔑 ' : ''}
+                  {atributo.nombre}: {atributo.tipoDato}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ),
+    },
+    style: {
+      width: 240,
+    },
+  }))
+}
+
+const construirAristas = (modelo: ModeloCompleto): Edge[] => {
+  return modelo.relaciones.map((relacion) => ({
+    id: relacion.id,
+    source: relacion.claseOrigenId,
+    target: relacion.claseDestinoId,
+    label: relacion.nombre ?? relacion.tipo,
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+    },
+  }))
 }
 
 function App() {
@@ -197,6 +254,9 @@ function App() {
   }
 
   if (proyectoAbierto && modeloAbierto) {
+    const nodos = construirNodos(modeloAbierto)
+    const aristas = construirAristas(modeloAbierto)
+
     return (
       <div className="app">
         <header className="encabezado">
@@ -231,29 +291,23 @@ function App() {
             </p>
           </section>
 
-          <section className="lista-clases">
-            {modeloAbierto.clases.length === 0 ? (
-              <div className="mensaje">
+          <section className="lienzo-uml">
+            {nodos.length === 0 ? (
+              <div className="mensaje modelo-vacio">
                 <p>Este proyecto todavía no tiene clases UML.</p>
               </div>
             ) : (
-              modeloAbierto.clases.map((clase) => (
-                <article className="tarjeta-clase" key={clase.id}>
-                  <h3>{clase.nombre}</h3>
-
-                  {clase.atributos.length === 0 ? (
-                    <p>Sin atributos</p>
-                  ) : (
-                    <ul>
-                      {clase.atributos.map((atributo) => (
-                        <li key={atributo.id}>
-                          {atributo.nombre}: {atributo.tipoDato}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </article>
-              ))
+              <ReactFlow
+                nodes={nodos}
+                edges={aristas}
+                fitView
+                nodesDraggable={false}
+                nodesConnectable={false}
+              >
+                <Background gap={20} size={1} />
+                <MiniMap />
+                <Controls />
+              </ReactFlow>
             )}
           </section>
         </main>

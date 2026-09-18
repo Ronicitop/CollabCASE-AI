@@ -281,3 +281,41 @@ body {
   margin: 0;
   padding-left: 20px;
 }
+
+.lienzo-uml {
+  width: 100%;
+  height: 600px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.modelo-vacio {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+}
+
+.nodo-uml {
+  text-align: left;
+  width: 100%;
+}
+
+.nodo-uml-titulo {
+  font-weight: 700;
+  font-size: 16px;
+  text-align: center;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #d1d5db;
+}
+
+.nodo-uml-atributos {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
