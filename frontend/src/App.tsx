@@ -6,6 +6,7 @@ import {
   MarkerType,
   MiniMap,
   ReactFlow,
+  useNodesState,
   type Edge,
   type Node,
 } from '@xyflow/react'
@@ -117,6 +118,9 @@ function App() {
   const [modeloAbierto, setModeloAbierto] = useState<ModeloCompleto | null>(null)
   const [abriendoId, setAbriendoId] = useState<string | null>(null)
   const [errorAbrir, setErrorAbrir] = useState('')
+  const [nodos, setNodos, onNodesChange] = useNodesState<Node>([])
+  const [guardandoModelo, setGuardandoModelo] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   useEffect(() => {
     fetch('http://localhost:8080/api/proyectos')
@@ -137,6 +141,14 @@ function App() {
         setCargando(false)
       })
   }, [])
+
+  useEffect(() => {
+    if (modeloAbierto) {
+      setNodos(construirNodos(modeloAbierto))
+    } else {
+      setNodos([])
+    }
+  }, [modeloAbierto, setNodos])
 
   const crearProyecto = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault()
@@ -247,14 +259,107 @@ function App() {
     }
   }
 
+  const guardarPosicionNodo = async (nodoMovido: Node) => {
+    if (!proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    try {
+      setGuardandoModelo(true)
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      posicionesPorId.set(nodoMovido.id, nodoMovido.position)
+
+      const solicitud = {
+        clases: modeloAbierto.clases.map((clase) => {
+          const posicion = posicionesPorId.get(clase.id) ?? {
+            x: clase.posicionX,
+            y: clase.posicionY,
+          }
+
+          return {
+            id: clase.id,
+            claveCliente: clase.id,
+            nombre: clase.nombre,
+            posicionX: posicion.x,
+            posicionY: posicion.y,
+            atributos: clase.atributos.map((atributo) => ({
+              id: atributo.id,
+              nombre: atributo.nombre,
+              tipoDato: atributo.tipoDato,
+              permiteNulo: atributo.permiteNulo,
+              identificador: atributo.identificador,
+            })),
+          }
+        }),
+
+        relaciones: modeloAbierto.relaciones.map((relacion) => ({
+          id: relacion.id,
+          claseOrigenClave: relacion.claseOrigenId,
+          claseDestinoClave: relacion.claseDestinoId,
+          tipo: relacion.tipo,
+          multiplicidadOrigen: relacion.multiplicidadOrigen,
+          multiplicidadDestino: relacion.multiplicidadDestino,
+          nombre: relacion.nombre,
+        })),
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje = 'No se pudo guardar la nueva posición de la clase'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Si la respuesta no contiene JSON, conservamos el mensaje general.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+    } catch (error) {
+      // Volvemos a las posiciones confirmadas por el modelo canónico.
+      setNodos(construirNodos(modeloAbierto))
+
+      if (error instanceof Error) {
+        setErrorGuardado(error.message)
+      } else {
+        setErrorGuardado('Ocurrió un error al guardar la posición')
+      }
+    } finally {
+      setGuardandoModelo(false)
+    }
+  }
+
   const cerrarProyecto = () => {
     setProyectoAbierto(null)
     setModeloAbierto(null)
     setErrorAbrir('')
+    setErrorGuardado('')
   }
 
   if (proyectoAbierto && modeloAbierto) {
-    const nodos = construirNodos(modeloAbierto)
     const aristas = construirAristas(modeloAbierto)
 
     return (
@@ -289,6 +394,12 @@ function App() {
             <p>
               Relaciones: <strong>{modeloAbierto.relaciones.length}</strong>
             </p>
+
+            {guardandoModelo && <p>Guardando posición...</p>}
+
+            {errorGuardado && (
+              <p className="error-formulario">{errorGuardado}</p>
+            )}
           </section>
 
           <section className="lienzo-uml">
@@ -300,8 +411,10 @@ function App() {
               <ReactFlow
                 nodes={nodos}
                 edges={aristas}
+                onNodesChange={onNodesChange}
+                onNodeDragStop={(_, nodo) => guardarPosicionNodo(nodo)}
                 fitView
-                nodesDraggable={false}
+                nodesDraggable={!guardandoModelo}
                 nodesConnectable={false}
               >
                 <Background gap={20} size={1} />
