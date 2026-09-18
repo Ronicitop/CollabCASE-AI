@@ -319,3 +319,36 @@ body {
   gap: 5px;
   font-size: 13px;
 }
+
+.barra-editor {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.boton-nueva-clase {
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.boton-nueva-clase:hover {
+  background: #1d4ed8;
+}
+
+.boton-nueva-clase:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.formulario-clase {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}

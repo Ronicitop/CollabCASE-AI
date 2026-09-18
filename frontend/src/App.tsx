@@ -122,6 +122,11 @@ function App() {
   const [guardandoModelo, setGuardandoModelo] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
 
+  const [mostrarFormularioClase, setMostrarFormularioClase] = useState(false)
+  const [nombreClase, setNombreClase] = useState('')
+  const [creandoClase, setCreandoClase] = useState(false)
+  const [errorClase, setErrorClase] = useState('')
+
   useEffect(() => {
     fetch('http://localhost:8080/api/proyectos')
       .then((respuesta) => {
@@ -352,11 +357,136 @@ function App() {
     }
   }
 
+  const crearClase = async (evento: FormEvent<HTMLFormElement>) => {
+    evento.preventDefault()
+
+    if (!proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    const nombreLimpio = nombreClase.trim()
+
+    if (!nombreLimpio) {
+      setErrorClase('El nombre de la clase es obligatorio.')
+      return
+    }
+
+    try {
+      setCreandoClase(true)
+      setErrorClase('')
+      setErrorGuardado('')
+
+      const posicionesPorId = new Map(
+        nodos.map((nodo) => [nodo.id, nodo.position]),
+      )
+
+      const cantidadClases = modeloAbierto.clases.length
+      const columna = cantidadClases % 3
+      const fila = Math.floor(cantidadClases / 3)
+
+      const claveNuevaClase = `nueva-${crypto.randomUUID()}`
+
+      const solicitud = {
+        clases: [
+          ...modeloAbierto.clases.map((clase) => {
+            const posicion = posicionesPorId.get(clase.id) ?? {
+              x: clase.posicionX,
+              y: clase.posicionY,
+            }
+
+            return {
+              id: clase.id,
+              claveCliente: clase.id,
+              nombre: clase.nombre,
+              posicionX: posicion.x,
+              posicionY: posicion.y,
+              atributos: clase.atributos.map((atributo) => ({
+                id: atributo.id,
+                nombre: atributo.nombre,
+                tipoDato: atributo.tipoDato,
+                permiteNulo: atributo.permiteNulo,
+                identificador: atributo.identificador,
+              })),
+            }
+          }),
+          {
+            id: null,
+            claveCliente: claveNuevaClase,
+            nombre: nombreLimpio,
+            posicionX: 80 + columna * 280,
+            posicionY: 80 + fila * 180,
+            atributos: [],
+          },
+        ],
+
+        relaciones: modeloAbierto.relaciones.map((relacion) => ({
+          id: relacion.id,
+          claseOrigenClave: relacion.claseOrigenId,
+          claseDestinoClave: relacion.claseDestinoId,
+          tipo: relacion.tipo,
+          multiplicidadOrigen: relacion.multiplicidadOrigen,
+          multiplicidadDestino: relacion.multiplicidadDestino,
+          nombre: relacion.nombre,
+        })),
+      }
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensaje = 'No se pudo crear la clase UML'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensaje = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general si la respuesta no contiene JSON.
+        }
+
+        throw new Error(mensaje)
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+      setNombreClase('')
+      setMostrarFormularioClase(false)
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorClase(error.message)
+      } else {
+        setErrorClase('Ocurrió un error al crear la clase UML')
+      }
+    } finally {
+      setCreandoClase(false)
+    }
+  }
+
+  const cancelarCreacionClase = () => {
+    setNombreClase('')
+    setErrorClase('')
+    setMostrarFormularioClase(false)
+  }
+
   const cerrarProyecto = () => {
     setProyectoAbierto(null)
     setModeloAbierto(null)
     setErrorAbrir('')
     setErrorGuardado('')
+    setMostrarFormularioClase(false)
+    setNombreClase('')
+    setErrorClase('')
   }
 
   if (proyectoAbierto && modeloAbierto) {
@@ -381,19 +511,76 @@ function App() {
 
         <main className="contenido">
           <section className="panel-editor">
-            <h2>Editor UML</h2>
+            <div className="barra-editor">
+              <div>
+                <h2>Editor UML</h2>
 
-            <p>
-              Versión del modelo: <strong>{modeloAbierto.version}</strong>
-            </p>
+                <p>
+                  Versión del modelo: <strong>{modeloAbierto.version}</strong>
+                </p>
 
-            <p>
-              Clases: <strong>{modeloAbierto.clases.length}</strong>
-            </p>
+                <p>
+                  Clases: <strong>{modeloAbierto.clases.length}</strong>
+                </p>
 
-            <p>
-              Relaciones: <strong>{modeloAbierto.relaciones.length}</strong>
-            </p>
+                <p>
+                  Relaciones: <strong>{modeloAbierto.relaciones.length}</strong>
+                </p>
+              </div>
+
+              <button
+                className="boton-nueva-clase"
+                type="button"
+                onClick={() => {
+                  setErrorClase('')
+                  setMostrarFormularioClase(true)
+                }}
+                disabled={creandoClase || guardandoModelo}
+              >
+                + Nueva clase
+              </button>
+            </div>
+
+            {mostrarFormularioClase && (
+              <form className="formulario-clase" onSubmit={crearClase}>
+                <div className="campo">
+                  <label htmlFor="nombreClase">Nombre de la clase</label>
+
+                  <input
+                    id="nombreClase"
+                    type="text"
+                    value={nombreClase}
+                    onChange={(evento) => setNombreClase(evento.target.value)}
+                    maxLength={100}
+                    placeholder="Ej: Cliente"
+                    autoFocus
+                  />
+                </div>
+
+                {errorClase && (
+                  <p className="error-formulario">{errorClase}</p>
+                )}
+
+                <div className="acciones-formulario">
+                  <button
+                    className="boton-cancelar"
+                    type="button"
+                    onClick={cancelarCreacionClase}
+                    disabled={creandoClase}
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    className="boton-guardar"
+                    type="submit"
+                    disabled={creandoClase}
+                  >
+                    {creandoClase ? 'Creando...' : 'Crear clase'}
+                  </button>
+                </div>
+              </form>
+            )}
 
             {guardandoModelo && <p>Guardando posición...</p>}
 
@@ -414,7 +601,7 @@ function App() {
                 onNodesChange={onNodesChange}
                 onNodeDragStop={(_, nodo) => guardarPosicionNodo(nodo)}
                 fitView
-                nodesDraggable={!guardandoModelo}
+                nodesDraggable={!guardandoModelo && !creandoClase}
                 nodesConnectable={false}
               >
                 <Background gap={20} size={1} />
