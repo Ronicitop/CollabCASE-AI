@@ -2,6 +2,10 @@ package com.collabcase.colaboracion.servicio;
 
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantLock;
@@ -17,18 +21,10 @@ public class GestorBloqueosColaborativos {
             String claveRecurso,
             Supplier<T> accion
     ) {
-        ReentrantLock bloqueo = bloqueos.computeIfAbsent(
-                claveRecurso,
-                clave -> new ReentrantLock(true)
+        return ejecutarConBloqueos(
+                List.of(claveRecurso),
+                accion
         );
-
-        bloqueo.lock();
-
-        try {
-            return accion.get();
-        } finally {
-            bloqueo.unlock();
-        }
     }
 
     public void ejecutarConBloqueo(
@@ -42,5 +38,37 @@ public class GestorBloqueosColaborativos {
                     return null;
                 }
         );
+    }
+
+    public <T> T ejecutarConBloqueos(
+            Collection<String> clavesRecursos,
+            Supplier<T> accion
+    ) {
+
+        List<String> clavesOrdenadas = clavesRecursos.stream()
+                .distinct()
+                .sorted(Comparator.naturalOrder())
+                .toList();
+
+        List<ReentrantLock> bloqueosAdquiridos =
+                new ArrayList<>();
+
+        try {
+            for (String clave : clavesOrdenadas) {
+                ReentrantLock bloqueo = bloqueos.computeIfAbsent(
+                        clave,
+                        valor -> new ReentrantLock(true)
+                );
+
+                bloqueo.lock();
+                bloqueosAdquiridos.add(bloqueo);
+            }
+
+            return accion.get();
+        } finally {
+            for (int i = bloqueosAdquiridos.size() - 1; i >= 0; i--) {
+                bloqueosAdquiridos.get(i).unlock();
+            }
+        }
     }
 }

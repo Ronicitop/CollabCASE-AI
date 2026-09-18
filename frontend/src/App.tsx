@@ -898,6 +898,47 @@ function App() {
       setErrorClase('')
       setErrorGuardado('')
 
+      if (sesionColaborativa) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de eliminar una clase.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo: 'ELIMINAR_CLASE',
+            datos: {
+              claseId: clase.id,
+            },
+          }),
+        })
+
+        if (claseSeleccionadaId === clase.id) {
+          setClaseSeleccionadaId(null)
+          setMostrarFormularioAtributo(false)
+          setAtributoEditandoId(null)
+          setNombreAtributo('')
+          setTipoDatoAtributo('')
+          setPermiteNuloAtributo(false)
+          setIdentificadorAtributo(false)
+          setErrorAtributo('')
+        }
+
+        if (claseEditandoId === clase.id) {
+          setClaseEditandoId(null)
+          setNombreClase('')
+          setMostrarFormularioClase(false)
+        }
+
+        return
+      }
+
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),
       )

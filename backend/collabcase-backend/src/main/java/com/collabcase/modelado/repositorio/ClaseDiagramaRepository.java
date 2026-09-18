@@ -57,4 +57,15 @@ public interface ClaseDiagramaRepository extends JpaRepository<ClaseDiagrama, UU
             @Param("modeloId") UUID modeloId,
             @Param("nombre") String nombre
     );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            delete from ClaseDiagrama c
+             where c.id = :claseId
+               and c.modelo.id = :modeloId
+            """)
+    int eliminarPorIdYModeloId(
+            @Param("claseId") UUID claseId,
+            @Param("modeloId") UUID modeloId
+    );
 }

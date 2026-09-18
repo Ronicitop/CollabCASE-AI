@@ -7,14 +7,17 @@ import com.collabcase.colaboracion.dto.TipoOperacionColaborativa;
 import com.collabcase.modelado.dominio.ClaseDiagrama;
 import com.collabcase.modelado.dominio.ModeloDiagrama;
 import com.collabcase.modelado.dto.ModeloCompletoResponse;
+import com.collabcase.modelado.repositorio.AtributoDiagramaRepository;
 import com.collabcase.modelado.repositorio.ClaseDiagramaRepository;
 import com.collabcase.modelado.repositorio.ModeloDiagramaRepository;
+import com.collabcase.modelado.repositorio.RelacionDiagramaRepository;
 import com.collabcase.modelado.servicio.ModeloDiagramaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -26,6 +29,8 @@ public class OperacionColaborativaService {
     private final GestorBloqueosColaborativos gestorBloqueosColaborativos;
 
     private final ClaseDiagramaRepository claseDiagramaRepository;
+    private final AtributoDiagramaRepository atributoDiagramaRepository;
+    private final RelacionDiagramaRepository relacionDiagramaRepository;
     private final ModeloDiagramaRepository modeloDiagramaRepository;
     private final ModeloDiagramaService modeloDiagramaService;
 
@@ -48,6 +53,9 @@ public class OperacionColaborativaService {
 
             case RENOMBRAR_CLASE ->
                     renombrarClase(sesion, solicitud);
+
+            case ELIMINAR_CLASE ->
+                    eliminarClase(sesion, solicitud);
 
             default ->
                     throw new IllegalStateException(
@@ -269,6 +277,82 @@ public class OperacionColaborativaService {
                                 if (filasClase != 1) {
                                     throw new IllegalStateException(
                                             "No se pudo actualizar el nombre de la clase UML"
+                                    );
+                                }
+
+                                incrementarVersionModelo(modelo.getId());
+
+                                ModeloCompletoResponse modeloActualizado =
+                                        modeloDiagramaService.obtenerModeloCompleto(
+                                                sesion.proyectoId()
+                                        );
+
+                                return construirRespuesta(
+                                        solicitud,
+                                        modeloActualizado
+                                );
+                            });
+
+                    return validarRespuestaTransaccion(respuesta);
+                }
+        );
+    }
+
+    private OperacionColaborativaResponse eliminarClase(
+            SesionColaborativaResponse sesion,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        JsonNode datos = solicitud.datos();
+
+        UUID claseId = UUID.fromString(
+                datos.get("claseId").asText()
+        );
+
+        List<String> clavesBloqueo = List.of(
+                "CLASE:" + claseId + ":ESTRUCTURA",
+                "CLASE:" + claseId + ":NOMBRE",
+                "CLASE:" + claseId + ":POSICION"
+        );
+
+        return gestorBloqueosColaborativos.ejecutarConBloqueos(
+                clavesBloqueo,
+                () -> {
+                    OperacionColaborativaResponse respuesta =
+                            transactionTemplate.execute(status -> {
+
+                                ClaseDiagrama clase = claseDiagramaRepository
+                                        .findById(claseId)
+                                        .orElseThrow(() ->
+                                                new IllegalArgumentException(
+                                                        "Clase UML no encontrada"
+                                                )
+                                        );
+
+                                ModeloDiagrama modelo = clase.getModelo();
+
+                                validarProyectoSesion(
+                                        modelo,
+                                        sesion
+                                );
+
+                                relacionDiagramaRepository.eliminarPorClaseId(
+                                        claseId
+                                );
+
+                                atributoDiagramaRepository.eliminarPorClaseId(
+                                        claseId
+                                );
+
+                                int filasClase =
+                                        claseDiagramaRepository.eliminarPorIdYModeloId(
+                                                claseId,
+                                                modelo.getId()
+                                        );
+
+                                if (filasClase != 1) {
+                                    throw new IllegalStateException(
+                                            "No se pudo eliminar la clase UML"
                                     );
                                 }
 
