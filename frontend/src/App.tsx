@@ -70,6 +70,13 @@ type SesionColaborativa = {
 
 type EstadoConexion = 'desconectado' | 'conectando' | 'conectado'
 
+type OperacionColaborativaResponse = {
+  operacionId: string
+  clienteId: string
+  tipo: string
+  modelo: ModeloCompleto
+}
+
 
 const construirNodos = (modelo: ModeloCompleto): Node[] => {
   return modelo.clases.map((clase) => ({
@@ -136,6 +143,7 @@ function App() {
   const [errorGuardado, setErrorGuardado] = useState('')
 
   const clienteStompRef = useRef<Client | null>(null)
+  const clienteIdRef = useRef(`cliente-${crypto.randomUUID()}`)
   const [sesionColaborativa, setSesionColaborativa] =
     useState<SesionColaborativa | null>(null)
   const [estadoConexion, setEstadoConexion] =
@@ -334,6 +342,27 @@ function App() {
           } catch {
             setErrorColaboracion(
               'Se recibió una actualización colaborativa inválida.',
+            )
+          }
+        },
+      )
+
+      cliente.subscribe(
+        `/topic/sesiones/${sesion.codigo}/operaciones`,
+        (mensaje) => {
+          try {
+            const respuestaOperacion: OperacionColaborativaResponse =
+              JSON.parse(mensaje.body)
+
+            if (
+              respuestaOperacion.modelo.proyectoId === sesion.proyectoId
+            ) {
+              setModeloAbierto(respuestaOperacion.modelo)
+              setErrorGuardado('')
+            }
+          } catch {
+            setErrorColaboracion(
+              'Se recibió una operación colaborativa inválida.',
             )
           }
         },
@@ -573,6 +602,32 @@ function App() {
     try {
       setGuardandoModelo(true)
       setErrorGuardado('')
+
+      if (sesionColaborativa) {
+        const cliente = clienteStompRef.current
+
+        if (estadoConexion !== 'conectado' || !cliente?.connected) {
+          throw new Error(
+            'La sesión colaborativa no está conectada. Espera la reconexión antes de mover una clase.',
+          )
+        }
+
+        cliente.publish({
+          destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
+          body: JSON.stringify({
+            operacionId: crypto.randomUUID(),
+            clienteId: clienteIdRef.current,
+            tipo: 'MOVER_CLASE',
+            datos: {
+              claseId: nodoMovido.id,
+              posicionX: nodoMovido.position.x,
+              posicionY: nodoMovido.position.y,
+            },
+          }),
+        })
+
+        return
+      }
 
       const posicionesPorId = new Map(
         nodos.map((nodo) => [nodo.id, nodo.position]),

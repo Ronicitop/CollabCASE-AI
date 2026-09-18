@@ -1,6 +1,9 @@
 package com.collabcase.colaboracion.controlador;
 
+import com.collabcase.colaboracion.dto.OperacionColaborativaRequest;
+import com.collabcase.colaboracion.dto.OperacionColaborativaResponse;
 import com.collabcase.colaboracion.dto.SesionColaborativaResponse;
+import com.collabcase.colaboracion.servicio.OperacionColaborativaService;
 import com.collabcase.colaboracion.servicio.SesionColaborativaService;
 import com.collabcase.modelado.dto.ModeloCompletoRequest;
 import com.collabcase.modelado.dto.ModeloCompletoResponse;
@@ -17,8 +20,14 @@ public class SincronizacionModeloController {
 
     private final SesionColaborativaService sesionColaborativaService;
     private final ModeloDiagramaService modeloDiagramaService;
+    private final OperacionColaborativaService operacionColaborativaService;
     private final SimpMessagingTemplate messagingTemplate;
 
+    /*
+     * Sincronización integral.
+     * Se mantiene temporalmente para las operaciones que todavía
+     * no han sido migradas al protocolo granular.
+     */
     @MessageMapping("/sesiones/{codigo}/modelo")
     public void sincronizarModelo(
             @DestinationVariable String codigo,
@@ -37,6 +46,32 @@ public class SincronizacionModeloController {
         messagingTemplate.convertAndSend(
                 "/topic/sesiones/" + sesion.codigo() + "/modelo",
                 modeloActualizado
+        );
+    }
+
+    /*
+     * Protocolo granular de colaboración.
+     */
+    @MessageMapping("/sesiones/{codigo}/operaciones")
+    public void aplicarOperacion(
+            @DestinationVariable String codigo,
+            OperacionColaborativaRequest solicitud
+    ) {
+
+        OperacionColaborativaResponse respuesta =
+                operacionColaborativaService.aplicarOperacion(
+                        codigo,
+                        solicitud
+                );
+
+        String codigoNormalizado =
+                codigo.trim().toUpperCase();
+
+        messagingTemplate.convertAndSend(
+                "/topic/sesiones/"
+                        + codigoNormalizado
+                        + "/operaciones",
+                respuesta
         );
     }
 }
