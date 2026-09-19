@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import {
   Background,
   BaseEdge,
@@ -370,6 +370,9 @@ function App() {
   const [procesandoIa, setProcesandoIa] = useState(false)
   const [errorIa, setErrorIa] = useState('')
   const [historialIa, setHistorialIa] = useState<MensajeChatIa[]>([])
+  const [procesandoArtefacto, setProcesandoArtefacto] = useState(false)
+  const [errorArtefacto, setErrorArtefacto] = useState('')
+  const inputXmiRef = useRef<HTMLInputElement | null>(null)
   const reconocedorVozRef = useRef<ReconocedorVoz | null>(null)
   const [escuchandoVoz, setEscuchandoVoz] = useState(false)
   const [errorVoz, setErrorVoz] = useState('')
@@ -1003,6 +1006,201 @@ function App() {
       }
     } finally {
       setAbriendoId(null)
+    }
+  }
+
+  const obtenerMensajeErrorHttp = async (
+    respuesta: Response,
+    mensajeFallback: string,
+  ): Promise<string> => {
+    try {
+      const detalle = await respuesta.json()
+
+      if (detalle?.mensaje) {
+        return detalle.mensaje
+      }
+    } catch {
+      // La respuesta puede ser un archivo o texto sin JSON.
+    }
+
+    return mensajeFallback
+  }
+
+  const descargarArchivo = async (
+    url: string,
+    nombreFallback: string,
+  ) => {
+    const respuesta = await fetch(url)
+
+    if (!respuesta.ok) {
+      throw new Error(
+        await obtenerMensajeErrorHttp(
+          respuesta,
+          'No se pudo descargar el archivo solicitado.',
+        ),
+      )
+    }
+
+    const blob = await respuesta.blob()
+    const disposition = respuesta.headers.get('content-disposition')
+    const coincidenciaNombre = disposition?.match(/filename="?([^";]+)"?/i)
+    const nombreArchivo = coincidenciaNombre?.[1]?.trim() || nombreFallback
+
+    const urlTemporal = URL.createObjectURL(blob)
+    const enlace = document.createElement('a')
+
+    enlace.href = urlTemporal
+    enlace.download = nombreArchivo
+    document.body.appendChild(enlace)
+    enlace.click()
+    enlace.remove()
+
+    URL.revokeObjectURL(urlTemporal)
+  }
+
+  const exportarXmi = async () => {
+    if (!proyectoAbierto) {
+      return
+    }
+
+    try {
+      setProcesandoArtefacto(true)
+      setErrorArtefacto('')
+
+      await descargarArchivo(
+        `http://localhost:8080/api/interoperabilidad/proyectos/${proyectoAbierto.id}/exportar/xmi`,
+        'modelo-collabcase.xmi',
+      )
+    } catch (error) {
+      setErrorArtefacto(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al exportar el modelo XMI.',
+      )
+    } finally {
+      setProcesandoArtefacto(false)
+    }
+  }
+
+  const generarBackendZip = async () => {
+    if (!proyectoAbierto) {
+      return
+    }
+
+    try {
+      setProcesandoArtefacto(true)
+      setErrorArtefacto('')
+
+      await descargarArchivo(
+        `http://localhost:8080/api/generacion/proyectos/${proyectoAbierto.id}/backend/zip`,
+        'backend-generado.zip',
+      )
+    } catch (error) {
+      setErrorArtefacto(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al generar el backend.',
+      )
+    } finally {
+      setProcesandoArtefacto(false)
+    }
+  }
+
+  const generarPostman = async () => {
+    if (!proyectoAbierto) {
+      return
+    }
+
+    try {
+      setProcesandoArtefacto(true)
+      setErrorArtefacto('')
+
+      await descargarArchivo(
+        `http://localhost:8080/api/generacion/proyectos/${proyectoAbierto.id}/postman`,
+        'collabcase.postman_collection.json',
+      )
+    } catch (error) {
+      setErrorArtefacto(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al generar la colección Postman.',
+      )
+    } finally {
+      setProcesandoArtefacto(false)
+    }
+  }
+
+  const abrirSelectorXmi = () => {
+    if (sesionColaborativa) {
+      setErrorArtefacto(
+        'Sal de la sesión colaborativa antes de importar XMI para evitar reemplazar el modelo mientras otros usuarios lo editan.',
+      )
+      return
+    }
+
+    setErrorArtefacto('')
+    inputXmiRef.current?.click()
+  }
+
+  const importarXmi = async (evento: ChangeEvent<HTMLInputElement>) => {
+    if (!proyectoAbierto) {
+      return
+    }
+
+    const archivo = evento.target.files?.[0]
+
+    if (!archivo) {
+      return
+    }
+
+    const confirmar = window.confirm(
+      `¿Importar "${archivo.name}"? El modelo actual se sincronizará con el contenido del XMI.`,
+    )
+
+    if (!confirmar) {
+      evento.target.value = ''
+      return
+    }
+
+    try {
+      setProcesandoArtefacto(true)
+      setErrorArtefacto('')
+
+      const formulario = new FormData()
+      formulario.append('archivo', archivo)
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/interoperabilidad/proyectos/${proyectoAbierto.id}/importar/xmi`,
+        {
+          method: 'POST',
+          body: formulario,
+        },
+      )
+
+      if (!respuesta.ok) {
+        throw new Error(
+          await obtenerMensajeErrorHttp(
+            respuesta,
+            'No se pudo importar el archivo XMI.',
+          ),
+        )
+      }
+
+      const modeloActualizado: ModeloCompleto = await respuesta.json()
+
+      setModeloAbierto(modeloActualizado)
+      setClaseSeleccionadaId(null)
+      setMostrarFormularioAtributo(false)
+      setAtributoEditandoId(null)
+    } catch (error) {
+      setErrorArtefacto(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al importar el modelo XMI.',
+      )
+    } finally {
+      evento.target.value = ''
+      setProcesandoArtefacto(false)
     }
   }
 
@@ -2141,6 +2339,7 @@ function App() {
     setAtributoEditandoId(null)
     setEliminandoAtributoId(null)
     setErrorAtributo('')
+    setErrorArtefacto('')
   }
 
   if (proyectoAbierto && modeloAbierto) {
@@ -2215,6 +2414,89 @@ function App() {
             {errorColaboracion && (
               <p className="error-formulario">{errorColaboracion}</p>
             )}
+
+            <section
+              aria-label="Interoperabilidad y generación"
+              style={{
+                marginTop: 18,
+                marginBottom: 18,
+                border: '1px solid #d9e2f0',
+                borderRadius: 12,
+                padding: 18,
+                background: '#ffffff',
+              }}
+            >
+              <div style={{ marginBottom: 12 }}>
+                <h3 style={{ margin: 0 }}>Interoperabilidad y generación</h3>
+                <p style={{ margin: '6px 0 0', color: '#526071' }}>
+                  Importa o exporta XMI y genera el backend Spring Boot o la
+                  colección Postman del modelo actual.
+                </p>
+              </div>
+
+              <input
+                ref={inputXmiRef}
+                type="file"
+                accept=".xmi,.xml,application/xml,text/xml"
+                onChange={importarXmi}
+                style={{ display: 'none' }}
+              />
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={abrirSelectorXmi}
+                  disabled={procesandoArtefacto || sesionColaborativa !== null}
+                >
+                  Importar XMI
+                </button>
+
+                <button
+                  type="button"
+                  onClick={exportarXmi}
+                  disabled={procesandoArtefacto}
+                >
+                  Exportar XMI
+                </button>
+
+                <button
+                  type="button"
+                  onClick={generarBackendZip}
+                  disabled={procesandoArtefacto}
+                >
+                  Generar backend ZIP
+                </button>
+
+                <button
+                  type="button"
+                  onClick={generarPostman}
+                  disabled={procesandoArtefacto}
+                >
+                  Generar Postman
+                </button>
+              </div>
+
+              {sesionColaborativa && (
+                <p style={{ margin: '10px 0 0', color: '#6b7280' }}>
+                  Para importar XMI, sal primero de la sesión colaborativa.
+                  Exportar y generar artefactos sí está permitido.
+                </p>
+              )}
+
+              {procesandoArtefacto && (
+                <p style={{ marginBottom: 0 }}>Procesando...</p>
+              )}
+
+              {errorArtefacto && (
+                <p className="error-formulario">{errorArtefacto}</p>
+              )}
+            </section>
 
             <section
               aria-label="Asistente IA"
