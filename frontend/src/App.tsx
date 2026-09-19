@@ -19,6 +19,7 @@ import { Client } from '@stomp/stompjs'
 
 import '@xyflow/react/dist/style.css'
 import './App.css'
+import { API_URL, WS_URL } from './config'
 
 type Proyecto = {
   id: string
@@ -408,7 +409,7 @@ function App() {
   const [eliminandoAtributoId, setEliminandoAtributoId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('http://localhost:8080/api/proyectos')
+    fetch(`${API_URL}/api/proyectos`)
       .then((respuesta) => {
         if (!respuesta.ok) {
           throw new Error('No se pudieron cargar los proyectos')
@@ -462,7 +463,7 @@ function App() {
       setErrorCreacion('')
 
       const respuesta = await fetch(
-        'http://localhost:8080/api/proyectos',
+        `${API_URL}/api/proyectos`,
         {
           method: 'POST',
           headers: {
@@ -511,12 +512,12 @@ function App() {
     proyectoId: string,
   ): Promise<ModeloCompleto> => {
     let respuesta = await fetch(
-      `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoId}/completo`,
+      `${API_URL}/api/modelos-diagrama/proyecto/${proyectoId}/completo`,
     )
 
     if (respuesta.status === 404) {
       const respuestaCreacion = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoId}`,
+        `${API_URL}/api/modelos-diagrama/proyecto/${proyectoId}`,
         {
           method: 'POST',
         },
@@ -527,7 +528,7 @@ function App() {
       }
 
       respuesta = await fetch(
-        `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoId}/completo`,
+        `${API_URL}/api/modelos-diagrama/proyecto/${proyectoId}/completo`,
       )
     }
 
@@ -550,7 +551,7 @@ function App() {
     setErrorColaboracion('')
 
     const cliente = new Client({
-      brokerURL: 'ws://localhost:8080/ws',
+      brokerURL: `${WS_URL}/ws`,
       reconnectDelay: 3000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
@@ -626,7 +627,7 @@ function App() {
       setErrorColaboracion('')
 
       const respuesta = await fetch(
-        `http://localhost:8080/api/sesiones-colaborativas/proyecto/${proyectoAbierto.id}`,
+        `${API_URL}/api/sesiones-colaborativas/proyecto/${proyectoAbierto.id}`,
         {
           method: 'POST',
         },
@@ -671,7 +672,7 @@ function App() {
       setErrorColaboracion('')
 
       const respuestaSesion = await fetch(
-        `http://localhost:8080/api/sesiones-colaborativas/unirse/${encodeURIComponent(codigoNormalizado)}`,
+        `${API_URL}/api/sesiones-colaborativas/unirse/${encodeURIComponent(codigoNormalizado)}`,
         {
           method: 'POST',
         },
@@ -705,7 +706,7 @@ function App() {
         proyectoSesion = proyectoExistente
       } else {
         const respuestaProyecto = await fetch(
-          `http://localhost:8080/api/proyectos/${sesion.proyectoId}`,
+          `${API_URL}/api/proyectos/${sesion.proyectoId}`,
         )
 
         if (!respuestaProyecto.ok) {
@@ -878,7 +879,7 @@ function App() {
       setMensajeIa('')
 
       const respuesta = await fetch(
-        `http://localhost:8080/api/ia/sesiones/${encodeURIComponent(
+        `${API_URL}/api/ia/sesiones/${encodeURIComponent(
           sesionColaborativa.codigo,
         )}/chat`,
         {
@@ -960,7 +961,7 @@ function App() {
     }
 
     const respuesta = await fetch(
-      `http://localhost:8080/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+      `${API_URL}/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
       {
         method: 'PUT',
         headers: {
@@ -1068,7 +1069,7 @@ function App() {
       setErrorArtefacto('')
 
       await descargarArchivo(
-        `http://localhost:8080/api/interoperabilidad/proyectos/${proyectoAbierto.id}/exportar/xmi`,
+        `${API_URL}/api/interoperabilidad/proyectos/${proyectoAbierto.id}/exportar/xmi`,
         'modelo-collabcase.xmi',
       )
     } catch (error) {
@@ -1092,7 +1093,7 @@ function App() {
       setErrorArtefacto('')
 
       await descargarArchivo(
-        `http://localhost:8080/api/generacion/proyectos/${proyectoAbierto.id}/backend/zip`,
+        `${API_URL}/api/generacion/proyectos/${proyectoAbierto.id}/backend/zip`,
         'backend-generado.zip',
       )
     } catch (error) {
@@ -1116,7 +1117,7 @@ function App() {
       setErrorArtefacto('')
 
       await descargarArchivo(
-        `http://localhost:8080/api/generacion/proyectos/${proyectoAbierto.id}/postman`,
+        `${API_URL}/api/generacion/proyectos/${proyectoAbierto.id}/postman`,
         'collabcase.postman_collection.json',
       )
     } catch (error) {
@@ -1170,7 +1171,7 @@ function App() {
       formulario.append('archivo', archivo)
 
       const respuesta = await fetch(
-        `http://localhost:8080/api/interoperabilidad/proyectos/${proyectoAbierto.id}/importar/xmi`,
+        `${API_URL}/api/interoperabilidad/proyectos/${proyectoAbierto.id}/importar/xmi`,
         {
           method: 'POST',
           body: formulario,
