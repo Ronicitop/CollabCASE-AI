@@ -1,6 +1,8 @@
 package com.collabcase.comun.excepcion;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -12,6 +14,9 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class ManejadorGlobalExcepciones {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(ManejadorGlobalExcepciones.class);
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> manejarIllegalArgument(
@@ -79,6 +84,13 @@ public class ManejadorGlobalExcepciones {
     public ResponseEntity<ErrorResponse> manejarGeneral(
             Exception ex,
             HttpServletRequest request) {
+
+        log.error(
+                "Error no controlado en {} {}",
+                request.getMethod(),
+                request.getRequestURI(),
+                ex
+        );
 
         ErrorResponse error = new ErrorResponse(
                 LocalDateTime.now(),

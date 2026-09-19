@@ -93,6 +93,19 @@ type OperacionColaborativaResponse = {
   modelo: ModeloCompleto
 }
 
+type ChatIaResponse = {
+  mensaje: string
+  accionesEjecutadas: string[]
+  modelo: ModeloCompleto
+}
+
+type MensajeChatIa = {
+  id: string
+  autor: 'usuario' | 'ia'
+  texto: string
+  acciones?: string[]
+}
+
 type DatosRelacionEdge = {
   nombre: string
   multiplicidadOrigen: string
@@ -309,6 +322,11 @@ function App() {
   const [codigoSesion, setCodigoSesion] = useState('')
   const [procesandoSesion, setProcesandoSesion] = useState(false)
   const [errorColaboracion, setErrorColaboracion] = useState('')
+
+  const [mensajeIa, setMensajeIa] = useState('')
+  const [procesandoIa, setProcesandoIa] = useState(false)
+  const [errorIa, setErrorIa] = useState('')
+  const [historialIa, setHistorialIa] = useState<MensajeChatIa[]>([])
 
   const [mostrarFormularioClase, setMostrarFormularioClase] = useState(false)
   const [nombreClase, setNombreClase] = useState('')
@@ -675,6 +693,102 @@ function App() {
     setEstadoConexion('desconectado')
     setCodigoSesion('')
     setErrorColaboracion('')
+    setMensajeIa('')
+    setErrorIa('')
+    setHistorialIa([])
+  }
+
+  const enviarMensajeIa = async (evento: FormEvent<HTMLFormElement>) => {
+    evento.preventDefault()
+
+    const mensajeLimpio = mensajeIa.trim()
+
+    if (!mensajeLimpio) {
+      setErrorIa('Escribe una instrucción para el asistente IA.')
+      return
+    }
+
+    if (!sesionColaborativa) {
+      setErrorIa(
+        'Inicia una sesión colaborativa para usar el asistente IA sobre el modelo.',
+      )
+      return
+    }
+
+    if (estadoConexion !== 'conectado') {
+      setErrorIa(
+        'La sesión colaborativa debe estar conectada antes de usar el asistente IA.',
+      )
+      return
+    }
+
+    const mensajeUsuario: MensajeChatIa = {
+      id: crypto.randomUUID(),
+      autor: 'usuario',
+      texto: mensajeLimpio,
+    }
+
+    try {
+      setProcesandoIa(true)
+      setErrorIa('')
+      setHistorialIa((actual) => [...actual, mensajeUsuario])
+      setMensajeIa('')
+
+      const respuesta = await fetch(
+        `http://localhost:8080/api/ia/sesiones/${encodeURIComponent(
+          sesionColaborativa.codigo,
+        )}/chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({
+            clienteId: clienteIdRef.current,
+            mensaje: mensajeLimpio,
+          }),
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensajeError =
+          'No se pudo procesar la instrucción con el asistente IA.'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensajeError = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general.
+        }
+
+        throw new Error(mensajeError)
+      }
+
+      const resultado: ChatIaResponse = await respuesta.json()
+
+      setModeloAbierto(resultado.modelo)
+
+      setHistorialIa((actual) => [
+        ...actual,
+        {
+          id: crypto.randomUUID(),
+          autor: 'ia',
+          texto: resultado.mensaje,
+          acciones: resultado.accionesEjecutadas,
+        },
+      ])
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorIa(error.message)
+      } else {
+        setErrorIa('Ocurrió un error al comunicarse con el asistente IA.')
+      }
+    } finally {
+      setProcesandoIa(false)
+    }
   }
 
   const guardarModeloConTransporte = async (
@@ -1961,6 +2075,149 @@ function App() {
             {errorColaboracion && (
               <p className="error-formulario">{errorColaboracion}</p>
             )}
+
+            <section
+              aria-label="Asistente IA"
+              style={{
+                marginTop: 18,
+                marginBottom: 22,
+                border: '1px solid #d9e2f0',
+                borderRadius: 12,
+                padding: 18,
+                background: '#ffffff',
+              }}
+            >
+              <div style={{ marginBottom: 12 }}>
+                <h3 style={{ margin: 0 }}>Asistente IA</h3>
+                <p style={{ margin: '6px 0 0', color: '#526071' }}>
+                  Describe en lenguaje natural los cambios que quieres realizar
+                  en el diagrama UML.
+                </p>
+              </div>
+
+              {!sesionColaborativa ? (
+                <p
+                  style={{
+                    margin: 0,
+                    padding: 12,
+                    borderRadius: 8,
+                    background: '#f6f8fb',
+                    color: '#526071',
+                  }}
+                >
+                  Inicia una sesión colaborativa para habilitar el asistente IA.
+                </p>
+              ) : (
+                <>
+                  {historialIa.length > 0 && (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gap: 10,
+                        maxHeight: 260,
+                        overflowY: 'auto',
+                        marginBottom: 14,
+                        padding: 4,
+                      }}
+                    >
+                      {historialIa.map((mensaje) => (
+                        <div
+                          key={mensaje.id}
+                          style={{
+                            justifySelf:
+                              mensaje.autor === 'usuario' ? 'end' : 'start',
+                            maxWidth: '86%',
+                            padding: '10px 12px',
+                            borderRadius: 10,
+                            background:
+                              mensaje.autor === 'usuario'
+                                ? '#e8f0ff'
+                                : '#f3f6f8',
+                          }}
+                        >
+                          <strong>
+                            {mensaje.autor === 'usuario' ? 'Tú' : 'CollabCASE AI'}
+                          </strong>
+
+                          <p style={{ margin: '5px 0 0', whiteSpace: 'pre-wrap' }}>
+                            {mensaje.texto}
+                          </p>
+
+                          {mensaje.acciones &&
+                            mensaje.acciones.length > 0 && (
+                              <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+                                {mensaje.acciones.map((accion, indice) => (
+                                  <li key={`${mensaje.id}-${indice}`}>
+                                    {accion}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <form onSubmit={enviarMensajeIa}>
+                    <label
+                      htmlFor="mensajeIa"
+                      style={{
+                        display: 'block',
+                        fontWeight: 600,
+                        marginBottom: 6,
+                      }}
+                    >
+                      Instrucción
+                    </label>
+
+                    <textarea
+                      id="mensajeIa"
+                      value={mensajeIa}
+                      onChange={(evento) => setMensajeIa(evento.target.value)}
+                      rows={3}
+                      maxLength={1000}
+                      placeholder="Ej: Crea una clase Cliente con id UUID como identificador y nombre String"
+                      disabled={
+                        procesandoIa || estadoConexion !== 'conectado'
+                      }
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        resize: 'vertical',
+                        padding: 10,
+                        border: '1px solid #cfd8e3',
+                        borderRadius: 8,
+                        font: 'inherit',
+                      }}
+                    />
+
+                    {errorIa && (
+                      <p className="error-formulario">{errorIa}</p>
+                    )}
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        marginTop: 10,
+                      }}
+                    >
+                      <button
+                        className="boton-guardar"
+                        type="submit"
+                        disabled={
+                          procesandoIa ||
+                          estadoConexion !== 'conectado' ||
+                          !mensajeIa.trim()
+                        }
+                      >
+                        {procesandoIa ? 'Procesando con IA...' : 'Enviar a IA'}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              )}
+            </section>
 
             <div className="barra-editor">
               <div>
