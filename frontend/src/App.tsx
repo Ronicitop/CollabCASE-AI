@@ -106,6 +106,49 @@ type MensajeChatIa = {
   acciones?: string[]
 }
 
+type AlternativaReconocimientoVoz = {
+  transcript: string
+}
+
+type ResultadoReconocimientoVoz = {
+  [indice: number]: AlternativaReconocimientoVoz
+  length: number
+  isFinal: boolean
+}
+
+type EventoReconocimientoVoz = {
+  results: {
+    [indice: number]: ResultadoReconocimientoVoz
+    length: number
+  }
+}
+
+type ErrorReconocimientoVoz = {
+  error: string
+}
+
+type ReconocedorVoz = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  onstart: (() => void) | null
+  onresult: ((evento: EventoReconocimientoVoz) => void) | null
+  onerror: ((evento: ErrorReconocimientoVoz) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type ConstructorReconocedorVoz = new () => ReconocedorVoz
+
+declare global {
+  interface Window {
+    SpeechRecognition?: ConstructorReconocedorVoz
+    webkitSpeechRecognition?: ConstructorReconocedorVoz
+  }
+}
+
 type DatosRelacionEdge = {
   nombre: string
   multiplicidadOrigen: string
@@ -327,6 +370,9 @@ function App() {
   const [procesandoIa, setProcesandoIa] = useState(false)
   const [errorIa, setErrorIa] = useState('')
   const [historialIa, setHistorialIa] = useState<MensajeChatIa[]>([])
+  const reconocedorVozRef = useRef<ReconocedorVoz | null>(null)
+  const [escuchandoVoz, setEscuchandoVoz] = useState(false)
+  const [errorVoz, setErrorVoz] = useState('')
 
   const [mostrarFormularioClase, setMostrarFormularioClase] = useState(false)
   const [nombreClase, setNombreClase] = useState('')
@@ -391,6 +437,11 @@ function App() {
     return () => {
       if (clienteStompRef.current) {
         void clienteStompRef.current.deactivate()
+      }
+
+      if (reconocedorVozRef.current) {
+        reconocedorVozRef.current.stop()
+        reconocedorVozRef.current = null
       }
     }
   }, [])
@@ -693,9 +744,98 @@ function App() {
     setEstadoConexion('desconectado')
     setCodigoSesion('')
     setErrorColaboracion('')
+    if (reconocedorVozRef.current) {
+      reconocedorVozRef.current.stop()
+      reconocedorVozRef.current = null
+    }
+
+    setEscuchandoVoz(false)
+    setErrorVoz('')
     setMensajeIa('')
     setErrorIa('')
     setHistorialIa([])
+  }
+
+  const alternarReconocimientoVoz = () => {
+    if (procesandoIa || estadoConexion !== 'conectado') {
+      return
+    }
+
+    if (escuchandoVoz) {
+      reconocedorVozRef.current?.stop()
+      return
+    }
+
+    const ConstructorReconocimiento =
+      window.SpeechRecognition ?? window.webkitSpeechRecognition
+
+    if (!ConstructorReconocimiento) {
+      setErrorVoz(
+        'Este navegador no admite reconocimiento de voz. Prueba con Chrome o Edge.',
+      )
+      return
+    }
+
+    const reconocedor = new ConstructorReconocimiento()
+
+    reconocedor.lang =
+      navigator.language && navigator.language.toLowerCase().startsWith('es')
+        ? navigator.language
+        : 'es-ES'
+
+    reconocedor.continuous = false
+    reconocedor.interimResults = false
+    reconocedor.maxAlternatives = 1
+
+    reconocedor.onstart = () => {
+      setEscuchandoVoz(true)
+      setErrorVoz('')
+    }
+
+    reconocedor.onresult = (evento) => {
+      let transcripcion = ''
+
+      for (let indice = 0; indice < evento.results.length; indice += 1) {
+        transcripcion += evento.results[indice]?.[0]?.transcript ?? ''
+      }
+
+      const textoReconocido = transcripcion.trim()
+
+      if (textoReconocido) {
+        setMensajeIa((actual) => {
+          const textoActual = actual.trim()
+
+          return textoActual
+            ? `${textoActual} ${textoReconocido}`
+            : textoReconocido
+        })
+      }
+    }
+
+    reconocedor.onerror = (evento) => {
+      const mensaje =
+        evento.error === 'not-allowed' || evento.error === 'service-not-allowed'
+          ? 'No se concedió permiso para usar el micrófono.'
+          : evento.error === 'no-speech'
+            ? 'No se detectó voz. Intenta hablar nuevamente.'
+            : `No se pudo reconocer la voz (${evento.error}).`
+
+      setErrorVoz(mensaje)
+    }
+
+    reconocedor.onend = () => {
+      setEscuchandoVoz(false)
+      reconocedorVozRef.current = null
+    }
+
+    try {
+      reconocedorVozRef.current = reconocedor
+      reconocedor.start()
+    } catch {
+      reconocedorVozRef.current = null
+      setEscuchandoVoz(false)
+      setErrorVoz('No se pudo iniciar el reconocimiento de voz.')
+    }
   }
 
   const enviarMensajeIa = async (evento: FormEvent<HTMLFormElement>) => {
@@ -2191,6 +2331,10 @@ function App() {
                       }}
                     />
 
+                    {errorVoz && (
+                      <p className="error-formulario">{errorVoz}</p>
+                    )}
+
                     {errorIa && (
                       <p className="error-formulario">{errorIa}</p>
                     )}
@@ -2198,10 +2342,48 @@ function App() {
                     <div
                       style={{
                         display: 'flex',
-                        justifyContent: 'flex-end',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 10,
                         marginTop: 10,
+                        flexWrap: 'wrap',
                       }}
                     >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={alternarReconocimientoVoz}
+                          disabled={
+                            procesandoIa || estadoConexion !== 'conectado'
+                          }
+                          aria-pressed={escuchandoVoz}
+                          style={{
+                            padding: '9px 14px',
+                            borderRadius: 8,
+                            border: '1px solid #cfd8e3',
+                            cursor:
+                              procesandoIa || estadoConexion !== 'conectado'
+                                ? 'not-allowed'
+                                : 'pointer',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {escuchandoVoz ? '⏹ Detener' : '🎙️ Dictar por voz'}
+                        </button>
+
+                        {escuchandoVoz && (
+                          <span style={{ fontWeight: 600 }}>
+                            Escuchando...
+                          </span>
+                        )}
+                      </div>
+
                       <button
                         className="boton-guardar"
                         type="submit"
