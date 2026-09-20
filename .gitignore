@@ -22,3 +22,8 @@
 # Sistema operativo
 .DS_Store
 Thumbs.db
+# Variables de entorno por ambiente
+.env.*
+*.env.*
+!**/.env.example
+!**/*.env.example
