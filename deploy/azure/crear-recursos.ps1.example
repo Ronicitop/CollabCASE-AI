@@ -1,4 +1,4 @@
-﻿# CollabCASE AI - Creacion de infraestructura Azure
+# CollabCASE AI - Creacion de infraestructura Azure
 # NO ejecutar hasta tener una suscripcion Azure activa.
 
 . "$PSScriptRoot\variables.ps1.example"
@@ -53,16 +53,5 @@ az webapp update `
     --resource-group $ResourceGroup `
     --name $BackendApp `
     --https-only true
-
-# 7. Desplegar JAR Spring Boot
-az webapp deploy `
-    --resource-group $ResourceGroup `
-    --name $BackendApp `
-    --src-path $JarPath `
-    --type jar
-
-# Limpiar password de la variable local
-$PostgresPassword = $null
-$PasswordSeguro = $null
 
 Write-Host "Infraestructura base creada."

@@ -1,0 +1,53 @@
+﻿# CollabCASE AI - Compilar y desplegar backend Spring Boot en Azure App Service
+# Ejecutar DESPUES de:
+# 1) crear-recursos.ps1
+# 2) crear-frontend.ps1
+# 3) configurar-backend.ps1
+
+. "$PSScriptRoot\variables.ps1.example"
+
+$RepoRoot = Resolve-Path "$PSScriptRoot\..\.."
+$BackendPath = Join-Path $RepoRoot "backend\collabcase-backend"
+
+Write-Host "=== Compilando backend CollabCASE AI ==="
+
+Push-Location $BackendPath
+
+try {
+    .\mvnw.cmd -DskipTests package
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "La compilacion del backend fallo."
+    }
+}
+finally {
+    Pop-Location
+}
+
+$JarCompleto = Join-Path $RepoRoot "backend\collabcase-backend\target\collabcase-backend-0.0.1-SNAPSHOT.jar"
+
+if (-not (Test-Path $JarCompleto)) {
+    throw "No se encontro el JAR generado: $JarCompleto"
+}
+
+Write-Host "=== Desplegando JAR en Azure App Service ==="
+
+az webapp deploy `
+    --resource-group $ResourceGroup `
+    --name $BackendApp `
+    --src-path $JarCompleto `
+    --type jar
+
+if ($LASTEXITCODE -ne 0) {
+    throw "El despliegue del backend fallo."
+}
+
+$BackendHostname = az webapp show `
+    --resource-group $ResourceGroup `
+    --name $BackendApp `
+    --query "defaultHostName" `
+    --output tsv
+
+Write-Host ""
+Write-Host "Backend desplegado:"
+Write-Host "https://$BackendHostname"
