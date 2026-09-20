@@ -1,0 +1,54 @@
+﻿# CollabCASE AI - Build y despliegue del frontend en Azure Static Web Apps
+# Ejecutar DESPUES de crear App Service y Static Web App.
+
+. "$PSScriptRoot\variables.ps1.example"
+
+$RepoRoot = Resolve-Path "$PSScriptRoot\..\.."
+$FrontendPath = Join-Path $RepoRoot "frontend"
+
+$BackendUrl = "https://${BackendApp}.azurewebsites.net"
+$WebSocketUrl = "wss://${BackendApp}.azurewebsites.net"
+
+Write-Host "Backend API: $BackendUrl"
+Write-Host "Backend WebSocket: $WebSocketUrl"
+
+# Obtener token de despliegue sin guardarlo en archivos.
+$DeploymentToken = az staticwebapp secrets list `
+    --name $FrontendName `
+    --resource-group $ResourceGroup `
+    --query "properties.apiKey" `
+    --output tsv
+
+if ([string]::IsNullOrWhiteSpace($DeploymentToken)) {
+    throw "No se pudo obtener el deployment token de Azure Static Web Apps."
+}
+
+Push-Location $FrontendPath
+
+try {
+    # Variables de Vite utilizadas durante el build.
+    $env:VITE_API_URL = $BackendUrl
+    $env:VITE_WS_URL = $WebSocketUrl
+
+    npm run build
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "El build del frontend fallo."
+    }
+
+    swa deploy ./dist `
+        --deployment-token $DeploymentToken `
+        --env production
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "El despliegue del frontend fallo."
+    }
+}
+finally {
+    Remove-Item Env:VITE_API_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:VITE_WS_URL -ErrorAction SilentlyContinue
+    $DeploymentToken = $null
+    Pop-Location
+}
+
+Write-Host "Frontend desplegado correctamente."

@@ -1,0 +1,29 @@
+﻿# CollabCASE AI - Crear Azure Static Web App
+# NO ejecutar hasta tener una suscripcion Azure activa.
+
+. "$PSScriptRoot\variables.ps1.example"
+
+Write-Host "=== Creando frontend Azure Static Web Apps ==="
+
+az staticwebapp create `
+    --name $FrontendName `
+    --resource-group $ResourceGroup `
+    --sku Free
+
+if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo crear Azure Static Web App."
+}
+
+$FrontendHostname = az staticwebapp show `
+    --name $FrontendName `
+    --resource-group $ResourceGroup `
+    --query "defaultHostname" `
+    --output tsv
+
+if ([string]::IsNullOrWhiteSpace($FrontendHostname)) {
+    throw "No se pudo obtener el hostname del frontend."
+}
+
+Write-Host ""
+Write-Host "Frontend creado:"
+Write-Host "https://$FrontendHostname"
