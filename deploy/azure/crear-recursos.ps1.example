@@ -1,0 +1,68 @@
+﻿# CollabCASE AI - Creacion de infraestructura Azure
+# NO ejecutar hasta tener una suscripcion Azure activa.
+
+. "$PSScriptRoot\variables.ps1.example"
+
+Write-Host "=== CollabCASE AI / Azure ==="
+
+# Solicitar password de PostgreSQL sin guardarlo en el repositorio.
+$PasswordSeguro = Read-Host "Password para PostgreSQL" -AsSecureString
+$PostgresPassword = [System.Net.NetworkCredential]::new("", $PasswordSeguro).Password
+
+# 1. Resource Group
+az group create `
+    --name $ResourceGroup `
+    --location $Location
+
+# 2. PostgreSQL Flexible Server
+az postgres flexible-server create `
+    --resource-group $ResourceGroup `
+    --name $PostgresServer `
+    --location $Location `
+    --admin-user $PostgresAdmin `
+    --admin-password $PostgresPassword `
+    --sku-name $PostgresSku `
+    --tier Burstable `
+    --version 17 `
+    --database-name $PostgresDatabase `
+    --public-access 0.0.0.0
+
+# 3. App Service Plan Linux
+az appservice plan create `
+    --name $AppServicePlan `
+    --resource-group $ResourceGroup `
+    --location $Location `
+    --sku $AppServiceSku `
+    --is-linux
+
+# 4. Backend Spring Boot / Java 21
+az webapp create `
+    --resource-group $ResourceGroup `
+    --plan $AppServicePlan `
+    --name $BackendApp `
+    --runtime "JAVA:21-java21"
+
+# 5. Habilitar WebSockets
+az webapp config set `
+    --resource-group $ResourceGroup `
+    --name $BackendApp `
+    --web-sockets-enabled true
+
+# 6. Forzar HTTPS
+az webapp update `
+    --resource-group $ResourceGroup `
+    --name $BackendApp `
+    --https-only true
+
+# 7. Desplegar JAR Spring Boot
+az webapp deploy `
+    --resource-group $ResourceGroup `
+    --name $BackendApp `
+    --src-path $JarPath `
+    --type jar
+
+# Limpiar password de la variable local
+$PostgresPassword = $null
+$PasswordSeguro = $null
+
+Write-Host "Infraestructura base creada."

@@ -1,0 +1,41 @@
+﻿# CollabCASE AI - Configuracion del backend en Azure App Service
+# Ejecutar DESPUES de crear PostgreSQL, App Service y el frontend.
+
+. "$PSScriptRoot\variables.ps1.example"
+
+Write-Host "=== Configuracion CollabCASE AI Backend ==="
+
+# Datos sensibles: se solicitan en ejecucion.
+$DbPasswordSeguro = Read-Host "Password de PostgreSQL" -AsSecureString
+$DbPassword = [System.Net.NetworkCredential]::new("", $DbPasswordSeguro).Password
+
+$OpenAiSeguro = Read-Host "OPENAI_API_KEY" -AsSecureString
+$OpenAiApiKey = [System.Net.NetworkCredential]::new("", $OpenAiSeguro).Password
+
+# URL publica del frontend, por ejemplo:
+# https://xxxxx.azurestaticapps.net
+$FrontendUrl = Read-Host "URL HTTPS del frontend"
+
+$DbUrl = "jdbc:postgresql://${PostgresServer}.postgres.database.azure.com:5432/${PostgresDatabase}?sslmode=require"
+
+az webapp config appsettings set `
+    --resource-group $ResourceGroup `
+    --name $BackendApp `
+    --settings `
+        "DB_URL=$DbUrl" `
+        "DB_USERNAME=$PostgresAdmin" `
+        "DB_PASSWORD=$DbPassword" `
+        "CORS_ALLOWED_ORIGINS=$FrontendUrl" `
+        "OPENAI_API_KEY=$OpenAiApiKey" `
+        "OPENAI_MODEL=gpt-5.6-luna" `
+        "OPENAI_BASE_URL=https://api.openai.com/v1/responses" `
+        "JPA_SHOW_SQL=false" `
+        "JAVA_OPTS=-Dfile.encoding=UTF-8"
+
+# Limpiar variables sensibles de esta sesion.
+$DbPassword = $null
+$DbPasswordSeguro = $null
+$OpenAiApiKey = $null
+$OpenAiSeguro = $null
+
+Write-Host "Configuracion del backend completada."

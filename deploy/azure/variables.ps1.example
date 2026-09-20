@@ -1,0 +1,22 @@
+﻿# CollabCASE AI - nombres base para Azure
+# Este archivo NO contiene secretos.
+
+$ResourceGroup = "rg-collabcase-ai"
+$Location = "eastus"
+
+# Backend
+$AppServicePlan = "asp-collabcase-ai"
+$BackendApp = "collabcase-ai-backend"
+$AppServiceSku = "B1"
+
+# PostgreSQL
+$PostgresServer = "collabcase-ai-postgres"
+$PostgresDatabase = "collabcase_db"
+$PostgresAdmin = "collabcaseadmin"
+$PostgresSku = "Standard_B1ms"
+
+# Artefacto Spring Boot
+$JarPath = ".\backend\collabcase-backend\target\collabcase-backend-0.0.1-SNAPSHOT.jar"
+
+# Frontend
+$FrontendName = "collabcase-ai-frontend"
