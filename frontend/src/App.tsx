@@ -20,6 +20,18 @@ import { Client } from '@stomp/stompjs'
 import '@xyflow/react/dist/style.css'
 import './App.css'
 import { API_URL, WS_URL } from './config'
+import { useOnlineStatus } from './offline/useOnlineStatus'
+import {
+  contarOperacionesPendientes,
+  guardarModeloOffline,
+  guardarModeloPendienteSincronizacion,
+  guardarProyectoOffline,
+  guardarProyectosOffline,
+  limpiarOperacionesProyecto,
+  obtenerModeloOffline,
+  obtenerOperacionesPendientes,
+  obtenerProyectosOffline,
+} from './offline/offlineDb'
 
 type Proyecto = {
   id: string
@@ -62,6 +74,38 @@ type ModeloCompleto = {
   actualizadoEn: string
   clases: ClaseDiagrama[]
   relaciones: RelacionDiagrama[]
+}
+
+type AtributoSolicitudModelo = {
+  id: string | null
+  nombre: string
+  tipoDato: string
+  permiteNulo: boolean
+  identificador: boolean
+}
+
+type ClaseSolicitudModelo = {
+  id: string | null
+  claveCliente: string
+  nombre: string
+  posicionX: number
+  posicionY: number
+  atributos: AtributoSolicitudModelo[]
+}
+
+type RelacionSolicitudModelo = {
+  id: string | null
+  claseOrigenClave: string
+  claseDestinoClave: string
+  tipo: string
+  multiplicidadOrigen: string | null
+  multiplicidadDestino: string | null
+  nombre: string | null
+}
+
+type SolicitudModeloCompleto = {
+  clases: ClaseSolicitudModelo[]
+  relaciones: RelacionSolicitudModelo[]
 }
 
 
@@ -339,9 +383,11 @@ const construirAristas = (modelo: ModeloCompleto): Edge[] => {
 }
 
 function App() {
+  const online = useOnlineStatus()
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
+  const [proyectosDesdeOffline, setProyectosDesdeOffline] = useState(false)
 
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
   const [nombre, setNombre] = useState('')
@@ -356,6 +402,9 @@ function App() {
   const [nodos, setNodos, onNodesChange] = useNodesState<Node>([])
   const [guardandoModelo, setGuardandoModelo] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
+  const [modeloDesdeOffline, setModeloDesdeOffline] = useState(false)
+  const [operacionesPendientes, setOperacionesPendientes] = useState(0)
+  const [sincronizandoOffline, setSincronizandoOffline] = useState(false)
 
   const clienteStompRef = useRef<Client | null>(null)
   const clienteIdRef = useRef(`cliente-${crypto.randomUUID()}`)
@@ -409,24 +458,92 @@ function App() {
   const [eliminandoAtributoId, setEliminandoAtributoId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(`${API_URL}/api/proyectos`)
-      .then((respuesta) => {
+    let cancelado = false
+
+    const cargarProyectos = async () => {
+      setCargando(true)
+      setError('')
+
+      try {
+        if (!online) {
+          throw new Error('SIN_CONEXION')
+        }
+
+        const respuesta = await fetch(`${API_URL}/api/proyectos`)
+
         if (!respuesta.ok) {
           throw new Error('No se pudieron cargar los proyectos')
         }
 
-        return respuesta.json()
-      })
-      .then((datos) => {
+        const datos: Proyecto[] = await respuesta.json()
+
+        if (cancelado) {
+          return
+        }
+
         setProyectos(datos)
-      })
-      .catch((error) => {
-        setError(error.message)
-      })
-      .finally(() => {
-        setCargando(false)
-      })
-  }, [])
+        setProyectosDesdeOffline(false)
+
+        void guardarProyectosOffline(datos).catch((error: unknown) => {
+          console.error(
+            'No se pudieron guardar los proyectos en IndexedDB.',
+            error,
+          )
+        })
+      } catch (errorCarga) {
+        try {
+          const proyectosLocales = await obtenerProyectosOffline()
+
+          if (cancelado) {
+            return
+          }
+
+          if (proyectosLocales.length > 0) {
+            setProyectos(proyectosLocales)
+            setProyectosDesdeOffline(true)
+            setError('')
+            return
+          }
+
+          setProyectos([])
+          setProyectosDesdeOffline(false)
+
+          if (
+            errorCarga instanceof Error &&
+            errorCarga.message !== 'SIN_CONEXION'
+          ) {
+            setError(
+              `${errorCarga.message}. No hay proyectos guardados localmente.`,
+            )
+          } else {
+            setError(
+              'No hay proyectos guardados localmente para trabajar sin conexión.',
+            )
+          }
+        } catch (errorLocal) {
+          if (!cancelado) {
+            setProyectos([])
+            setProyectosDesdeOffline(false)
+            setError(
+              errorLocal instanceof Error
+                ? errorLocal.message
+                : 'No se pudieron cargar los proyectos locales.',
+            )
+          }
+        }
+      } finally {
+        if (!cancelado) {
+          setCargando(false)
+        }
+      }
+    }
+
+    void cargarProyectos()
+
+    return () => {
+      cancelado = true
+    }
+  }, [online])
 
   useEffect(() => {
     if (modeloAbierto) {
@@ -435,6 +552,18 @@ function App() {
       setNodos([])
     }
   }, [modeloAbierto, setNodos])
+
+  useEffect(() => {
+    if (!modeloAbierto) {
+      return
+    }
+
+    void guardarModeloOffline(modeloAbierto.proyectoId, modeloAbierto).catch(
+      (error: unknown) => {
+        console.error('No se pudo guardar el modelo en IndexedDB.', error)
+      },
+    )
+  }, [modeloAbierto])
 
 
   useEffect(() => {
@@ -486,6 +615,13 @@ function App() {
         ...proyectosActuales,
         nuevoProyecto,
       ])
+
+      void guardarProyectoOffline(nuevoProyecto).catch((error: unknown) => {
+        console.error(
+          'No se pudo guardar el proyecto en IndexedDB.',
+          error,
+        )
+      })
 
       setNombre('')
       setDescripcion('')
@@ -935,12 +1071,94 @@ function App() {
     }
   }
 
+  const esIdLocal = (id: string): boolean => id.startsWith('local-')
+
+  const construirModeloLocalDesdeSolicitud = (
+    solicitud: SolicitudModeloCompleto,
+  ): ModeloCompleto => {
+    if (!modeloAbierto || !proyectoAbierto) {
+      throw new Error('No hay un modelo abierto para guardar localmente.')
+    }
+
+    const clavesAIds = new Map<string, string>()
+
+    const clases: ClaseDiagrama[] = solicitud.clases.map((clase) => {
+      const claseId = clase.id ?? `local-clase-${crypto.randomUUID()}`
+
+      clavesAIds.set(clase.claveCliente, claseId)
+      clavesAIds.set(claseId, claseId)
+
+      return {
+        id: claseId,
+        nombre: clase.nombre,
+        posicionX: clase.posicionX,
+        posicionY: clase.posicionY,
+        atributos: clase.atributos.map((atributo) => ({
+          id: atributo.id ?? `local-atributo-${crypto.randomUUID()}`,
+          nombre: atributo.nombre,
+          tipoDato: atributo.tipoDato,
+          permiteNulo: atributo.permiteNulo,
+          identificador: atributo.identificador,
+        })),
+      }
+    })
+
+    const relaciones: RelacionDiagrama[] = solicitud.relaciones.map((relacion) => ({
+      id: relacion.id ?? `local-relacion-${crypto.randomUUID()}`,
+      claseOrigenId:
+        clavesAIds.get(relacion.claseOrigenClave) ?? relacion.claseOrigenClave,
+      claseDestinoId:
+        clavesAIds.get(relacion.claseDestinoClave) ?? relacion.claseDestinoClave,
+      tipo: relacion.tipo,
+      multiplicidadOrigen: relacion.multiplicidadOrigen,
+      multiplicidadDestino: relacion.multiplicidadDestino,
+      nombre: relacion.nombre,
+    }))
+
+    return {
+      ...modeloAbierto,
+      proyectoId: proyectoAbierto.id,
+      actualizadoEn: new Date().toISOString(),
+      clases,
+      relaciones,
+    }
+  }
+
+  const guardarCambioLocal = async (
+    solicitud: SolicitudModeloCompleto,
+  ): Promise<ModeloCompleto> => {
+    if (!proyectoAbierto || !modeloAbierto) {
+      throw new Error('No hay un proyecto abierto.')
+    }
+
+    const modeloLocal = construirModeloLocalDesdeSolicitud(solicitud)
+
+    await guardarModeloOffline(proyectoAbierto.id, modeloLocal)
+    await guardarModeloPendienteSincronizacion(
+      proyectoAbierto.id,
+      modeloLocal,
+      modeloAbierto.version,
+    )
+
+    const cantidadPendiente = await contarOperacionesPendientes(proyectoAbierto.id)
+
+    setModeloAbierto(modeloLocal)
+    setModeloDesdeOffline(true)
+    setOperacionesPendientes(cantidadPendiente)
+
+    return modeloLocal
+  }
+
   const guardarModeloConTransporte = async (
-    solicitud: unknown,
+    solicitud: SolicitudModeloCompleto,
     mensajeError: string,
   ): Promise<ModeloCompleto | null> => {
     if (!proyectoAbierto) {
       throw new Error('No hay un proyecto abierto.')
+    }
+
+    if (!online) {
+      return guardarCambioLocal(solicitud)
     }
 
     if (sesionColaborativa) {
@@ -960,16 +1178,24 @@ function App() {
       return null
     }
 
-    const respuesta = await fetch(
-      `${API_URL}/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
+    let respuesta: Response
+
+    try {
+      respuesta = await fetch(
+        `${API_URL}/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
         },
-        body: JSON.stringify(solicitud),
-      },
-    )
+      )
+    } catch {
+      // navigator.onLine puede seguir indicando conexión aunque el backend
+      // no sea alcanzable. En ese caso preservamos el trabajo localmente.
+      return guardarCambioLocal(solicitud)
+    }
 
     if (!respuesta.ok) {
       let mensaje = mensajeError
@@ -990,15 +1216,201 @@ function App() {
     return respuesta.json()
   }
 
+  const construirSolicitudServidorDesdeModeloLocal = (
+    modelo: ModeloCompleto,
+  ): SolicitudModeloCompleto => ({
+    clases: modelo.clases.map((clase) => ({
+      id: esIdLocal(clase.id) ? null : clase.id,
+      claveCliente: clase.id,
+      nombre: clase.nombre,
+      posicionX: clase.posicionX,
+      posicionY: clase.posicionY,
+      atributos: clase.atributos.map((atributo) => ({
+        id: esIdLocal(atributo.id) ? null : atributo.id,
+        nombre: atributo.nombre,
+        tipoDato: atributo.tipoDato,
+        permiteNulo: atributo.permiteNulo,
+        identificador: atributo.identificador,
+      })),
+    })),
+    relaciones: modelo.relaciones.map((relacion) => ({
+      id: esIdLocal(relacion.id) ? null : relacion.id,
+      claseOrigenClave: relacion.claseOrigenId,
+      claseDestinoClave: relacion.claseDestinoId,
+      tipo: relacion.tipo,
+      multiplicidadOrigen: relacion.multiplicidadOrigen,
+      multiplicidadDestino: relacion.multiplicidadDestino,
+      nombre: relacion.nombre,
+    })),
+  })
+
+  const sincronizarCambiosOffline = async () => {
+    if (!online || !proyectoAbierto || !modeloAbierto) {
+      return
+    }
+
+    if (sesionColaborativa) {
+      setErrorGuardado(
+        'Sal de la sesión colaborativa antes de sincronizar cambios realizados sin conexión.',
+      )
+      return
+    }
+
+    try {
+      setSincronizandoOffline(true)
+      setErrorGuardado('')
+
+      const pendientes = await obtenerOperacionesPendientes(proyectoAbierto.id)
+      const snapshots = pendientes.filter(
+        (operacion) => operacion.tipo === 'GUARDAR_MODELO_COMPLETO',
+      )
+      const ultimaOperacion = snapshots[snapshots.length - 1]
+
+      if (!ultimaOperacion) {
+        setOperacionesPendientes(0)
+        return
+      }
+
+      const modeloLocal = ultimaOperacion.datos.modelo as ModeloCompleto | undefined
+
+      if (!modeloLocal) {
+        throw new Error('No se encontró el modelo local pendiente de sincronización.')
+      }
+
+      const modeloServidor = await obtenerModeloCompleto(proyectoAbierto.id)
+
+      if (
+        ultimaOperacion.versionBase !== undefined &&
+        modeloServidor.version !== ultimaOperacion.versionBase
+      ) {
+        throw new Error(
+          `Conflicto de sincronización: el servidor está en la versión ${modeloServidor.version} y tus cambios locales parten de la versión ${ultimaOperacion.versionBase}. No se sobrescribió ningún cambio.`,
+        )
+      }
+
+      const solicitud = construirSolicitudServidorDesdeModeloLocal(modeloLocal)
+      const respuesta = await fetch(
+        `${API_URL}/api/modelos-diagrama/proyecto/${proyectoAbierto.id}/completo`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(solicitud),
+        },
+      )
+
+      if (!respuesta.ok) {
+        throw new Error(
+          await obtenerMensajeErrorHttp(
+            respuesta,
+            'No se pudieron sincronizar los cambios locales.',
+          ),
+        )
+      }
+
+      const modeloSincronizado: ModeloCompleto = await respuesta.json()
+
+      await guardarModeloOffline(proyectoAbierto.id, modeloSincronizado)
+      await limpiarOperacionesProyecto(proyectoAbierto.id)
+
+      setModeloAbierto(modeloSincronizado)
+      setModeloDesdeOffline(false)
+      setOperacionesPendientes(0)
+      setErrorGuardado('')
+    } catch (error) {
+      setErrorGuardado(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al sincronizar los cambios locales.',
+      )
+    } finally {
+      setSincronizandoOffline(false)
+    }
+  }
+
   const abrirProyecto = async (proyecto: Proyecto) => {
     try {
       setAbriendoId(proyecto.id)
       setErrorAbrir('')
 
-      const modelo = await obtenerModeloCompleto(proyecto.id)
+      let modelo: ModeloCompleto
+      let cargadoDesdeOffline = false
+      const cantidadPendiente = await contarOperacionesPendientes(proyecto.id)
+
+      if (cantidadPendiente > 0) {
+        const pendientes = await obtenerOperacionesPendientes(proyecto.id)
+        const snapshots = pendientes.filter(
+          (operacion) => operacion.tipo === 'GUARDAR_MODELO_COMPLETO',
+        )
+        const snapshot = snapshots[snapshots.length - 1]
+        const modeloPendiente = snapshot?.datos.modelo as ModeloCompleto | undefined
+
+        if (modeloPendiente) {
+          modelo = modeloPendiente
+        } else {
+          const modeloLocal = await obtenerModeloOffline(proyecto.id)
+
+          if (!modeloLocal) {
+            throw new Error(
+              'Existen cambios pendientes, pero no se encontró la copia local del modelo.',
+            )
+          }
+
+          modelo = modeloLocal.modelo as ModeloCompleto
+        }
+
+        cargadoDesdeOffline = true
+      } else if (online) {
+        try {
+          modelo = await obtenerModeloCompleto(proyecto.id)
+        } catch (errorServidor) {
+          const modeloLocal = await obtenerModeloOffline(proyecto.id)
+
+          if (!modeloLocal) {
+            throw errorServidor
+          }
+
+          modelo = modeloLocal.modelo as ModeloCompleto
+          cargadoDesdeOffline = true
+        }
+      } else {
+        const modeloLocal = await obtenerModeloOffline(proyecto.id)
+
+        if (!modeloLocal) {
+          throw new Error(
+            'Este proyecto todavía no tiene una copia local disponible.',
+          )
+        }
+
+        modelo = modeloLocal.modelo as ModeloCompleto
+        cargadoDesdeOffline = true
+      }
+
+      if (
+        !modelo ||
+        modelo.proyectoId !== proyecto.id ||
+        !Array.isArray(modelo.clases) ||
+        !Array.isArray(modelo.relaciones)
+      ) {
+        throw new Error(
+          'La copia local del modelo no es válida o está incompleta.',
+        )
+      }
 
       setProyectoAbierto(proyecto)
       setModeloAbierto(modelo)
+      setModeloDesdeOffline(cargadoDesdeOffline)
+      setOperacionesPendientes(cantidadPendiente)
+
+      if (!cargadoDesdeOffline) {
+        void guardarProyectoOffline(proyecto).catch((error: unknown) => {
+          console.error(
+            'No se pudo actualizar el proyecto en IndexedDB.',
+            error,
+          )
+        })
+      }
     } catch (error) {
       if (error instanceof Error) {
         setErrorAbrir(error.message)
@@ -1214,7 +1626,7 @@ function App() {
       setGuardandoModelo(true)
       setErrorGuardado('')
 
-      if (sesionColaborativa) {
+      if (sesionColaborativa && online) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -1332,7 +1744,7 @@ function App() {
       setErrorClase('')
       setErrorGuardado('')
 
-      if (sesionColaborativa && claseEditandoId !== null) {
+      if (sesionColaborativa && online && claseEditandoId !== null) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -1360,7 +1772,7 @@ function App() {
         return
       }
 
-      if (sesionColaborativa && claseEditandoId === null) {
+      if (sesionColaborativa && online && claseEditandoId === null) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -1509,7 +1921,7 @@ function App() {
       setErrorClase('')
       setErrorGuardado('')
 
-      if (sesionColaborativa) {
+      if (sesionColaborativa && online) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -1684,7 +2096,7 @@ function App() {
       setErrorAtributo('')
       setErrorGuardado('')
 
-      if (sesionColaborativa) {
+      if (sesionColaborativa && online) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -1853,7 +2265,7 @@ function App() {
       setErrorAtributo('')
       setErrorGuardado('')
 
-      if (sesionColaborativa) {
+      if (sesionColaborativa && online) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -2000,7 +2412,7 @@ function App() {
       setErrorRelacion('')
       setErrorGuardado('')
 
-      if (sesionColaborativa) {
+      if (sesionColaborativa && online) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -2193,7 +2605,7 @@ function App() {
       setErrorRelacion('')
       setErrorGuardado('')
 
-      if (sesionColaborativa) {
+      if (sesionColaborativa && online) {
         const cliente = clienteStompRef.current
 
         if (estadoConexion !== 'conectado' || !cliente?.connected) {
@@ -2314,6 +2726,9 @@ function App() {
     salirSesionColaborativa()
     setProyectoAbierto(null)
     setModeloAbierto(null)
+    setModeloDesdeOffline(false)
+    setOperacionesPendientes(0)
+    setSincronizandoOffline(false)
     setErrorAbrir('')
     setErrorGuardado('')
     setMostrarFormularioRelacion(false)
@@ -2388,28 +2803,85 @@ function App() {
                 ) : (
                   <p>Inicia una sesión para compartir este proyecto.</p>
                 )}
+
+                <p
+                  style={{
+                    margin: '8px 0 0',
+                    fontWeight: 700,
+                    color: online ? '#15803d' : '#b91c1c',
+                  }}
+                >
+                  {online
+                    ? '🟢 Internet disponible'
+                    : '🔴 Sin conexión · trabajando localmente'}
+                </p>
+
+                {modeloDesdeOffline && (
+                  <p
+                    style={{
+                      margin: '6px 0 0',
+                      color: '#526071',
+                      fontWeight: 600,
+                    }}
+                  >
+                    💾 Modelo cargado desde el almacenamiento local.
+                  </p>
+                )}
+
+                {operacionesPendientes > 0 && (
+                  <p
+                    style={{
+                      margin: '6px 0 0',
+                      color: '#9a6700',
+                      fontWeight: 700,
+                    }}
+                  >
+                    🕒 Hay cambios locales pendientes de sincronización.
+                  </p>
+                )}
               </div>
 
-              {sesionColaborativa ? (
-                <button
-                  className="boton-salir-sesion"
-                  type="button"
-                  onClick={salirSesionColaborativa}
-                >
-                  Salir de la sesión
-                </button>
-              ) : (
-                <button
-                  className="boton-iniciar-sesion"
-                  type="button"
-                  onClick={iniciarSesionColaborativa}
-                  disabled={procesandoSesion}
-                >
-                  {procesandoSesion
-                    ? 'Iniciando...'
-                    : 'Iniciar sesión colaborativa'}
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {online && operacionesPendientes > 0 && !sesionColaborativa && (
+                  <button
+                    type="button"
+                    onClick={() => void sincronizarCambiosOffline()}
+                    disabled={sincronizandoOffline}
+                  >
+                    {sincronizandoOffline
+                      ? 'Sincronizando...'
+                      : 'Sincronizar cambios'}
+                  </button>
+                )}
+
+                {sesionColaborativa ? (
+                  <button
+                    className="boton-salir-sesion"
+                    type="button"
+                    onClick={salirSesionColaborativa}
+                  >
+                    Salir de la sesión
+                  </button>
+                ) : (
+                  <button
+                    className="boton-iniciar-sesion"
+                    type="button"
+                    onClick={iniciarSesionColaborativa}
+                    disabled={procesandoSesion || !online || operacionesPendientes > 0}
+                    title={
+                      !online
+                        ? 'La colaboración requiere conexión.'
+                        : operacionesPendientes > 0
+                          ? 'Sincroniza primero los cambios locales.'
+                          : undefined
+                    }
+                  >
+                    {procesandoSesion
+                      ? 'Iniciando...'
+                      : 'Iniciar sesión colaborativa'}
+                  </button>
+                )}
+              </div>
             </div>
 
             {errorColaboracion && (
@@ -2453,7 +2925,9 @@ function App() {
                 <button
                   type="button"
                   onClick={abrirSelectorXmi}
-                  disabled={procesandoArtefacto || sesionColaborativa !== null}
+                  disabled={
+                    procesandoArtefacto || sesionColaborativa !== null || !online
+                  }
                 >
                   Importar XMI
                 </button>
@@ -2461,7 +2935,7 @@ function App() {
                 <button
                   type="button"
                   onClick={exportarXmi}
-                  disabled={procesandoArtefacto}
+                  disabled={procesandoArtefacto || !online}
                 >
                   Exportar XMI
                 </button>
@@ -2469,7 +2943,7 @@ function App() {
                 <button
                   type="button"
                   onClick={generarBackendZip}
-                  disabled={procesandoArtefacto}
+                  disabled={procesandoArtefacto || !online}
                 >
                   Generar backend ZIP
                 </button>
@@ -2477,11 +2951,18 @@ function App() {
                 <button
                   type="button"
                   onClick={generarPostman}
-                  disabled={procesandoArtefacto}
+                  disabled={procesandoArtefacto || !online}
                 >
                   Generar Postman
                 </button>
               </div>
+
+              {!online && (
+                <p style={{ margin: '10px 0 0', color: '#6b7280' }}>
+                  Estas funciones requieren conexión con el backend. El editor UML
+                  básico continúa disponible sin Internet.
+                </p>
+              )}
 
               {sesionColaborativa && (
                 <p style={{ margin: '10px 0 0', color: '#6b7280' }}>
@@ -3314,6 +3795,17 @@ function App() {
         <div>
           <h1>CollabCASE AI</h1>
           <p>Herramienta CASE colaborativa para modelado UML</p>
+          <p
+            style={{
+              margin: '6px 0 0',
+              fontWeight: 700,
+              color: online ? '#15803d' : '#b91c1c',
+            }}
+          >
+            {online
+              ? '🟢 Internet disponible'
+              : '🔴 Sin conexión · trabajando localmente'}
+          </p>
         </div>
       </header>
 
@@ -3328,10 +3820,27 @@ function App() {
             className="boton-nuevo"
             type="button"
             onClick={() => setMostrarFormulario(true)}
+            disabled={!online}
+            title={!online ? 'Crear proyectos requiere conexión.' : undefined}
           >
             + Nuevo proyecto
           </button>
         </section>
+
+        {proyectosDesdeOffline && (
+          <p
+            style={{
+              margin: '0 0 16px',
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: '#f6f8fb',
+              color: '#526071',
+              fontWeight: 600,
+            }}
+          >
+            💾 Mostrando proyectos guardados en este dispositivo.
+          </p>
+        )}
 
         <form
           className="formulario-unirse-sesion"
@@ -3356,7 +3865,8 @@ function App() {
             <button
               className="boton-unirse-sesion"
               type="submit"
-              disabled={procesandoSesion}
+              disabled={procesandoSesion || !online}
+              title={!online ? 'Unirse a una sesión requiere conexión.' : undefined}
             >
               {procesandoSesion ? 'Uniéndose...' : 'Unirse'}
             </button>
