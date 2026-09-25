@@ -691,6 +691,7 @@ function App() {
   const reconocedorVozRef = useRef<ReconocedorVoz | null>(null)
   const [escuchandoVoz, setEscuchandoVoz] = useState(false)
   const [errorVoz, setErrorVoz] = useState('')
+  const inputCamaraRef = useRef<HTMLInputElement | null>(null)
   const inputImagenRef = useRef<HTMLInputElement | null>(null)
   const [procesandoImagen, setProcesandoImagen] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
@@ -1245,6 +1246,19 @@ function App() {
       setEscuchandoVoz(false)
       setErrorVoz('No se pudo iniciar el reconocimiento de voz.')
     }
+  }
+
+  const abrirCamaraImagen = () => {
+    if (
+      procesandoIa ||
+      procesandoImagen ||
+      estadoConexion !== 'conectado'
+    ) {
+      return
+    }
+
+    setErrorImagen('')
+    inputCamaraRef.current?.click()
   }
 
   const abrirSelectorImagen = () => {
@@ -3419,10 +3433,18 @@ function App() {
               ) : (
                 <>
                   <input
-                    ref={inputImagenRef}
+                    ref={inputCamaraRef}
                     type="file"
                     accept="image/*"
                     capture="environment"
+                    onChange={enviarImagenIa}
+                    style={{ display: 'none' }}
+                  />
+
+                  <input
+                    ref={inputImagenRef}
+                    type="file"
+                    accept="image/*"
                     onChange={enviarImagenIa}
                     style={{ display: 'none' }}
                   />
@@ -3574,6 +3596,33 @@ function App() {
 
                         <button
                           type="button"
+                          onClick={abrirCamaraImagen}
+                          disabled={
+                            procesandoIa ||
+                            procesandoImagen ||
+                            estadoConexion !== 'conectado'
+                          }
+                          style={{
+                            padding: '9px 14px',
+                            borderRadius: 8,
+                            border: '1px solid #cfd8e3',
+                            cursor:
+                              procesandoIa ||
+                              procesandoImagen ||
+                              estadoConexion !== 'conectado'
+                                ? 'not-allowed'
+                                : 'pointer',
+                            fontWeight: 600,
+                          }}
+                          title="En el celular abre la cámara trasera para fotografiar el diagrama UML."
+                        >
+                          {procesandoImagen
+                            ? 'Analizando imagen...'
+                            : '📷 Tomar foto'}
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={abrirSelectorImagen}
                           disabled={
                             procesandoIa ||
@@ -3592,11 +3641,9 @@ function App() {
                                 : 'pointer',
                             fontWeight: 600,
                           }}
-                          title="En el celular abre la cámara; en PC permite elegir una imagen."
+                          title="Selecciona una imagen ya guardada en el dispositivo."
                         >
-                          {procesandoImagen
-                            ? 'Analizando imagen...'
-                            : '📷 Foto / imagen'}
+                          🖼️ Elegir imagen
                         </button>
                       </div>
 
