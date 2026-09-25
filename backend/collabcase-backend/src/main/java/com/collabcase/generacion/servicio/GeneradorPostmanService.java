@@ -406,6 +406,69 @@ public class GeneradorPostmanService {
                 continue;
             }
 
+            /*
+             * Una Association Class no se representa en Postman como una
+             * relacion directa entre origen y destino.
+             *
+             * La clase de asociacion es la entidad intermedia y debe recibir
+             * una referencia hacia cada extremo, igual que el backend
+             * generado por GeneradorBackendService.
+             */
+            if (relacion.claseAsociacionId() != null) {
+
+                ClaseDiagramaResponse claseAsociacion =
+                        clasesPorId.get(
+                                relacion.claseAsociacionId()
+                        );
+
+                if (claseAsociacion == null) {
+                    continue;
+                }
+
+                if (claseActual.id().equals(
+                        relacion.claseAsociacionId()
+                )) {
+
+                    String campoOrigen =
+                            normalizadorNombreJava.campo(
+                                    origen.nombre()
+                            );
+
+                    String campoDestino =
+                            normalizadorNombreJava.campo(
+                                    destino.nombre()
+                            );
+
+                    /*
+                     * Caso especial: asociacion reflexiva.
+                     */
+                    if (campoOrigen.equals(campoDestino)) {
+                        campoOrigen += "Origen";
+                        campoDestino += "Destino";
+                    }
+
+                    campos.add(
+                            referenciaRelacionConCampo(
+                                    origen,
+                                    campoOrigen
+                            )
+                    );
+
+                    campos.add(
+                            referenciaRelacionConCampo(
+                                    destino,
+                                    campoDestino
+                            )
+                    );
+                }
+
+                /*
+                 * No generar tambien la relacion normal entre los extremos.
+                 * La clase de asociacion ya representa ese vinculo.
+                 */
+                continue;
+            }
+
             boolean origenMuchos =
                     esMuchos(
                             relacion.multiplicidadOrigen()
@@ -488,6 +551,27 @@ public class GeneradorPostmanService {
                         claseReferenciada,
                         relacion
                 );
+
+        InfoId idRelacionado =
+                resolverIdentificador(
+                        claseReferenciada
+                );
+
+        return "  \""
+                + escaparJson(campo)
+                + "\": {\n"
+                + "    \""
+                + escaparJson(idRelacionado.campo())
+                + "\": \"{{"
+                + escaparJson(variableId(claseReferenciada))
+                + "}}\"\n"
+                + "  }";
+    }
+
+    private String referenciaRelacionConCampo(
+            ClaseDiagramaResponse claseReferenciada,
+            String campo
+    ) {
 
         InfoId idRelacionado =
                 resolverIdentificador(

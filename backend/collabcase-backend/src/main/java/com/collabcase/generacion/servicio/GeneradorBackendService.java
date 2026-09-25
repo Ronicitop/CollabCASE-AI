@@ -302,6 +302,93 @@ public class GeneradorBackendService {
                 );
             }
 
+            /*
+             * Una clase de asociacion no se genera como una relacion JPA
+             * directa entre origen y destino.
+             *
+             * La clase de asociacion se convierte en la entidad intermedia
+             * y recibe una referencia obligatoria hacia cada extremo.
+             */
+            if (relacion.claseAsociacionId() != null) {
+
+                ClaseDiagramaResponse claseAsociacion =
+                        clasesPorId.get(
+                                relacion.claseAsociacionId()
+                        );
+
+                if (claseAsociacion == null) {
+                    throw new IllegalArgumentException(
+                            "La relacion referencia una clase de asociacion inexistente"
+                    );
+                }
+
+                if (claseActual.id().equals(
+                        claseAsociacion.id()
+                )) {
+
+                    String campoOrigen =
+                            normalizadorNombreJava.campo(
+                                    origen.nombre()
+                            );
+
+                    String campoDestino =
+                            normalizadorNombreJava.campo(
+                                    destino.nombre()
+                            );
+
+                    /*
+                     * En una asociacion reflexiva ambos extremos apuntan
+                     * a la misma clase, por lo que necesitan nombres distintos.
+                     */
+                    if (campoOrigen.equals(campoDestino)) {
+                        campoOrigen += "Origen";
+                        campoDestino += "Destino";
+                    }
+
+                    validarCampoRelacionUnico(
+                            nombresCampo,
+                            campoOrigen,
+                            claseActual
+                    );
+
+                    validarCampoRelacionUnico(
+                            nombresCampo,
+                            campoDestino,
+                            claseActual
+                    );
+
+                    resultado.add(
+                            new CampoRelacion(
+                                    campoOrigen,
+                                    false,
+                                    generarManyToOne(
+                                            origen,
+                                            campoOrigen,
+                                            true
+                                    )
+                            )
+                    );
+
+                    resultado.add(
+                            new CampoRelacion(
+                                    campoDestino,
+                                    false,
+                                    generarManyToOne(
+                                            destino,
+                                            campoDestino,
+                                            true
+                                    )
+                            )
+                    );
+                }
+
+                /*
+                 * No se genera ademas la relacion directa entre los extremos:
+                 * la entidad intermedia representa la clase de asociacion.
+                 */
+                continue;
+            }
+
             boolean origenMuchos =
                     esMuchos(
                             relacion.multiplicidadOrigen()
