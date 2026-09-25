@@ -26,7 +26,9 @@ public record RelacionDiagramaRequest(
         String multiplicidadDestino,
 
         @Size(max = 100)
-        String nombre
+        String nombre,
+
+        String claseAsociacionClave
 
 ) {
 }

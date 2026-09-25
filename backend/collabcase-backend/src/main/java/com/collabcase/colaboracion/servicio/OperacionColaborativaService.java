@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -629,6 +630,9 @@ public class OperacionColaborativaService {
         String nombre =
                 obtenerTextoOpcional(datos, "nombre");
 
+        UUID claseAsociacionId =
+                obtenerUuidOpcional(datos, "claseAsociacionId");
+
         validarRelacion(
                 tipo,
                 multiplicidadOrigen,
@@ -638,9 +642,17 @@ public class OperacionColaborativaService {
 
         ModeloDiagrama modelo = obtenerModeloDeSesion(sesion);
 
-        List<String> clavesBloqueo = List.of(
-                "CLASE:" + claseOrigenId + ":ESTRUCTURA",
-                "CLASE:" + claseDestinoId + ":ESTRUCTURA",
+        List<String> clavesBloqueo = new ArrayList<>();
+        clavesBloqueo.add("CLASE:" + claseOrigenId + ":ESTRUCTURA");
+        clavesBloqueo.add("CLASE:" + claseDestinoId + ":ESTRUCTURA");
+
+        if (claseAsociacionId != null) {
+            clavesBloqueo.add(
+                    "CLASE:" + claseAsociacionId + ":ESTRUCTURA"
+            );
+        }
+
+        clavesBloqueo.add(
                 "MODELO:" + modelo.getId() + ":RELACIONES"
         );
 
@@ -662,12 +674,27 @@ public class OperacionColaborativaService {
                                                 sesion
                                         );
 
+                                ClaseDiagrama claseAsociacion =
+                                        claseAsociacionId == null
+                                                ? null
+                                                : obtenerClaseDeSesion(
+                                                        claseAsociacionId,
+                                                        sesion
+                                                );
+
+                                boolean claseAsociacionFueraModelo =
+                                        claseAsociacion != null
+                                                && !claseAsociacion.getModelo()
+                                                        .getId()
+                                                        .equals(modelo.getId());
+
                                 if (!claseOrigen.getModelo()
                                         .getId()
                                         .equals(modelo.getId())
                                         || !claseDestino.getModelo()
                                         .getId()
-                                        .equals(modelo.getId())) {
+                                        .equals(modelo.getId())
+                                        || claseAsociacionFueraModelo) {
 
                                     throw new IllegalStateException(
                                             "Las clases de la relación no pertenecen al modelo de la sesión"
@@ -687,6 +714,9 @@ public class OperacionColaborativaService {
                                                         multiplicidadDestino
                                                 )
                                                 .nombre(nombre)
+                                                .claseAsociacion(
+                                                        claseAsociacion
+                                                )
                                                 .build();
 
                                 relacionDiagramaRepository.saveAndFlush(
@@ -727,6 +757,9 @@ public class OperacionColaborativaService {
         String nombre =
                 obtenerTextoOpcional(datos, "nombre");
 
+        UUID claseAsociacionId =
+                obtenerUuidOpcional(datos, "claseAsociacionId");
+
         validarRelacion(
                 tipo,
                 multiplicidadOrigen,
@@ -736,10 +769,17 @@ public class OperacionColaborativaService {
 
         ModeloDiagrama modelo = obtenerModeloDeSesion(sesion);
 
-        List<String> clavesBloqueo = List.of(
-                "MODELO:" + modelo.getId() + ":RELACIONES",
-                "RELACION:" + relacionId
+        List<String> clavesBloqueo = new ArrayList<>();
+        clavesBloqueo.add(
+                "MODELO:" + modelo.getId() + ":RELACIONES"
         );
+        clavesBloqueo.add("RELACION:" + relacionId);
+
+        if (claseAsociacionId != null) {
+            clavesBloqueo.add(
+                    "CLASE:" + claseAsociacionId + ":ESTRUCTURA"
+            );
+        }
 
         return gestorBloqueosColaborativos.ejecutarConBloqueos(
                 clavesBloqueo,
@@ -754,6 +794,24 @@ public class OperacionColaborativaService {
                                                 sesion
                                         );
 
+                                ClaseDiagrama claseAsociacion =
+                                        claseAsociacionId == null
+                                                ? null
+                                                : obtenerClaseDeSesion(
+                                                        claseAsociacionId,
+                                                        sesion
+                                                );
+
+                                if (claseAsociacion != null
+                                        && !claseAsociacion.getModelo()
+                                                .getId()
+                                                .equals(modelo.getId())) {
+
+                                    throw new IllegalStateException(
+                                            "La clase de asociación no pertenece al modelo de la sesión"
+                                    );
+                                }
+
                                 int filasRelacion =
                                         relacionDiagramaRepository
                                                 .actualizarRelacion(
@@ -762,7 +820,8 @@ public class OperacionColaborativaService {
                                                         tipo,
                                                         multiplicidadOrigen,
                                                         multiplicidadDestino,
-                                                        nombre
+                                                        nombre,
+                                                        claseAsociacion
                                                 );
 
                                 if (filasRelacion != 1) {
@@ -874,6 +933,24 @@ public class OperacionColaborativaService {
         }
 
         return relacion;
+    }
+
+    private UUID obtenerUuidOpcional(
+            JsonNode datos,
+            String campo
+    ) {
+
+        JsonNode valor = datos.get(campo);
+
+        if (valor == null || valor.isNull()) {
+            return null;
+        }
+
+        String texto = valor.asString().trim();
+
+        return texto.isBlank()
+                ? null
+                : UUID.fromString(texto);
     }
 
     private String obtenerTextoOpcional(

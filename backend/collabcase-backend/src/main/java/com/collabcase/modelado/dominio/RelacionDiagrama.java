@@ -50,6 +50,10 @@ public class RelacionDiagrama {
     )
     private ClaseDiagrama claseDestino;
 
+    @ManyToOne
+    @JoinColumn(name = "clase_asociacion_id")
+    private ClaseDiagrama claseAsociacion;
+
     @Column(nullable = false, length = 30)
     private String tipo;
 

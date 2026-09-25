@@ -109,7 +109,10 @@ public class ImportacionModeloService {
                             relacion.tipo(),
                             relacion.multiplicidadOrigen(),
                             relacion.multiplicidadDestino(),
-                            vacioANull(relacion.nombre())
+                            vacioANull(relacion.nombre()),
+                            vacioANull(
+                                    relacion.claseAsociacionXmiId()
+                            )
                     )
             );
         }

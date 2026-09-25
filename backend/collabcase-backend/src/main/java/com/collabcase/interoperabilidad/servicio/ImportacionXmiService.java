@@ -126,7 +126,7 @@ public class ImportacionXmiService {
                 tiposPorId.put(id, nombre);
             }
 
-            if ("uml:Class".equals(tipo)
+            if (esTipoClase(tipo)
                     && !id.isBlank()
                     && !nombre.isBlank()) {
 
@@ -142,7 +142,7 @@ public class ImportacionXmiService {
 
         for (Element elemento : elementosEmpaquetados) {
 
-            if (!"uml:Class".equals(
+            if (!esTipoClase(
                     atributoXmi(elemento, "type")
             )) {
                 continue;
@@ -227,7 +227,8 @@ public class ImportacionXmiService {
                                 ),
                                 normalizarMultiplicidad(
                                         conector.sourceMultiplicidad()
-                                )
+                                ),
+                                null
                         );
 
             } else {
@@ -236,7 +237,82 @@ public class ImportacionXmiService {
                         leerRelacionUmlPura(
                                 elemento,
                                 relacionId,
-                                nombre
+                                nombre,
+                                null
+                        );
+            }
+
+            if (relacion != null) {
+                relaciones.add(relacion);
+            }
+        }
+
+        /*
+         * Una uml:AssociationClass es simultáneamente una clase y una
+         * asociación. La clase ya fue añadida arriba; aquí reconstruimos
+         * su relación principal y conservamos la referencia a la propia
+         * clase de asociación.
+         */
+        for (Element elemento : elementosEmpaquetados) {
+
+            if (!"uml:AssociationClass".equals(
+                    atributoXmi(elemento, "type")
+            )) {
+                continue;
+            }
+
+            String claseAsociacionId =
+                    atributoXmi(elemento, "id");
+
+            String nombreClaseAsociacion =
+                    elemento.getAttribute("name");
+
+            ConectorEa conector =
+                    buscarConectorClaseAsociacion(
+                            conectores,
+                            claseAsociacionId
+                    );
+
+            RelacionImportada relacion;
+
+            if (conector != null) {
+
+                String nombreRelacion =
+                        conector.nombre() == null
+                                || conector.nombre().isBlank()
+                                ? nombreClaseAsociacion
+                                : conector.nombre();
+
+                /*
+                 * Enterprise Architect reexporta la Association Class con
+                 * source/target invertidos respecto del sentido original
+                 * usado por CollabCASE. Aplicamos la misma regla de
+                 * round-trip que para las asociaciones normales.
+                 */
+                relacion =
+                        new RelacionImportada(
+                                claseAsociacionId,
+                                nombreRelacion,
+                                "ASOCIACION",
+                                conector.targetId(),
+                                conector.sourceId(),
+                                normalizarMultiplicidad(
+                                        conector.targetMultiplicidad()
+                                ),
+                                normalizarMultiplicidad(
+                                        conector.sourceMultiplicidad()
+                                ),
+                                claseAsociacionId
+                        );
+
+            } else {
+
+                relacion =
+                        leerRelacionUmlPura(
+                                elemento,
+                                claseAsociacionId,
+                                nombreClaseAsociacion,
+                                claseAsociacionId
                         );
             }
 
@@ -378,7 +454,8 @@ public class ImportacionXmiService {
     private RelacionImportada leerRelacionUmlPura(
             Element asociacion,
             String relacionId,
-            String nombre
+            String nombre,
+            String claseAsociacionXmiId
     ) {
 
         List<Element> extremos =
@@ -404,7 +481,8 @@ public class ImportacionXmiService {
                 leerTipoExtremo(origen),
                 leerTipoExtremo(destino),
                 leerMultiplicidadExtremo(origen),
-                leerMultiplicidadExtremo(destino)
+                leerMultiplicidadExtremo(destino),
+                claseAsociacionXmiId
         );
     }
 
@@ -547,6 +625,19 @@ public class ImportacionXmiService {
                                     "aggregation"
                             );
 
+            Element propiedadesExtendidas =
+                    primerHijoDirecto(
+                            conector,
+                            "extendedProperties"
+                    );
+
+            String claseAsociacionId =
+                    propiedadesExtendidas == null
+                            ? null
+                            : propiedadesExtendidas.getAttribute(
+                                    "associationclass"
+                            );
+
             conectores.put(
                     id,
                     new ConectorEa(
@@ -561,12 +652,40 @@ public class ImportacionXmiService {
                             sourceMultiplicidad,
                             targetMultiplicidad,
                             sourceAgregacion,
-                            targetAgregacion
+                            targetAgregacion,
+                            conector.getAttribute("name"),
+                            claseAsociacionId
                     )
             );
         }
 
         return conectores;
+    }
+
+    private ConectorEa buscarConectorClaseAsociacion(
+            Map<String, ConectorEa> conectores,
+            String claseAsociacionId
+    ) {
+
+        if (claseAsociacionId == null
+                || claseAsociacionId.isBlank()) {
+            return null;
+        }
+
+        for (ConectorEa conector : conectores.values()) {
+            if (claseAsociacionId.equals(
+                    conector.claseAsociacionId()
+            )) {
+                return conector;
+            }
+        }
+
+        return null;
+    }
+
+    private boolean esTipoClase(String tipo) {
+        return "uml:Class".equals(tipo)
+                || "uml:AssociationClass".equals(tipo);
     }
 
     private String resolverTipoRelacion(
@@ -983,7 +1102,9 @@ public class ImportacionXmiService {
             String sourceMultiplicidad,
             String targetMultiplicidad,
             String sourceAgregacion,
-            String targetAgregacion
+            String targetAgregacion,
+            String nombre,
+            String claseAsociacionId
     ) {
     }
 }

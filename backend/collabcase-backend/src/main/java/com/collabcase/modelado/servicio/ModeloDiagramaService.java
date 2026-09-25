@@ -145,7 +145,10 @@ public class ModeloDiagramaService {
                                         relacion.getTipo(),
                                         relacion.getMultiplicidadOrigen(),
                                         relacion.getMultiplicidadDestino(),
-                                        relacion.getNombre()
+                                        relacion.getNombre(),
+                                        relacion.getClaseAsociacion() == null
+                                                ? null
+                                                : relacion.getClaseAsociacion().getId()
                                 )
                         )
                         .toList();
@@ -322,6 +325,22 @@ public class ModeloDiagramaService {
             ClaseDiagrama claseDestino =
                     clasesPorClave.get(request.claseDestinoClave());
 
+            ClaseDiagrama claseAsociacion = null;
+
+            if (request.claseAsociacionClave() != null
+                    && !request.claseAsociacionClave().isBlank()) {
+
+                claseAsociacion =
+                        clasesPorClave.get(request.claseAsociacionClave());
+
+                if (claseAsociacion == null) {
+                    throw new IllegalArgumentException(
+                            "No existe la clase de asociación con claveCliente: "
+                                    + request.claseAsociacionClave()
+                    );
+                }
+            }
+
             if (claseOrigen == null) {
                 throw new IllegalArgumentException(
                         "No existe la clase origen con claveCliente: "
@@ -352,6 +371,7 @@ public class ModeloDiagramaService {
                                 request.multiplicidadDestino()
                         )
                         .nombre(request.nombre())
+                        .claseAsociacion(claseAsociacion)
                         .build();
 
             } else {
@@ -381,6 +401,7 @@ public class ModeloDiagramaService {
                         request.multiplicidadDestino()
                 );
                 relacion.setNombre(request.nombre());
+                relacion.setClaseAsociacion(claseAsociacion);
             }
 
             relacion = relacionDiagramaRepository.save(relacion);

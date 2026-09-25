@@ -9,6 +9,7 @@ public record RelacionDiagramaResponse(
         String tipo,
         String multiplicidadOrigen,
         String multiplicidadDestino,
-        String nombre
+        String nombre,
+        UUID claseAsociacionId
 ) {
 }

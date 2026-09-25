@@ -1,5 +1,6 @@
 package com.collabcase.modelado.repositorio;
 
+import com.collabcase.modelado.dominio.ClaseDiagrama;
 import com.collabcase.modelado.dominio.RelacionDiagrama;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -29,7 +30,8 @@ public interface RelacionDiagramaRepository extends JpaRepository<RelacionDiagra
             @Param("tipo") String tipo,
             @Param("multiplicidadOrigen") String multiplicidadOrigen,
             @Param("multiplicidadDestino") String multiplicidadDestino,
-            @Param("nombre") String nombre
+            @Param("nombre") String nombre,
+            @Param("claseAsociacion") ClaseDiagrama claseAsociacion
     );
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
@@ -48,6 +50,7 @@ public interface RelacionDiagramaRepository extends JpaRepository<RelacionDiagra
             delete from RelacionDiagrama r
              where r.claseOrigen.id = :claseId
                 or r.claseDestino.id = :claseId
+                or r.claseAsociacion.id = :claseId
             """)
     int eliminarPorClaseId(
             @Param("claseId") UUID claseId

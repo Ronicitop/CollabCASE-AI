@@ -33,7 +33,8 @@ public record ModeloImportadoXmi(
             String claseOrigenXmiId,
             String claseDestinoXmiId,
             String multiplicidadOrigen,
-            String multiplicidadDestino
+            String multiplicidadDestino,
+            String claseAsociacionXmiId
     ) {
     }
 }

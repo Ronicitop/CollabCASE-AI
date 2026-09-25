@@ -11,6 +11,7 @@ public record OperacionIa(
         Boolean identificador,
         String claseOrigen,
         String claseDestino,
+        String claseAsociacion,
         String tipoRelacion,
         String multiplicidadOrigen,
         String multiplicidadDestino,

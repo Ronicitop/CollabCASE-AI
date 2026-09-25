@@ -5,10 +5,11 @@ import {
   BaseEdge,
   Controls,
   EdgeLabelRenderer,
-  MarkerType,
   MiniMap,
+  Position,
   ReactFlow,
-  getBezierPath,
+  getSmoothStepPath,
+  useInternalNode,
   useNodesState,
   type Edge,
   type EdgeProps,
@@ -65,6 +66,7 @@ type RelacionDiagrama = {
   multiplicidadOrigen: string | null
   multiplicidadDestino: string | null
   nombre: string | null
+  claseAsociacionId: string | null
 }
 
 type ModeloCompleto = {
@@ -101,6 +103,7 @@ type RelacionSolicitudModelo = {
   multiplicidadOrigen: string | null
   multiplicidadDestino: string | null
   nombre: string | null
+  claseAsociacionClave: string | null
 }
 
 type SolicitudModeloCompleto = {
@@ -196,8 +199,11 @@ declare global {
 
 type DatosRelacionEdge = {
   nombre: string
+  tipo: string
   multiplicidadOrigen: string
   multiplicidadDestino: string
+  claseAsociacionX?: number
+  claseAsociacionY?: number
 }
 
 const estiloEtiquetaRelacion = {
@@ -213,73 +219,321 @@ const estiloEtiquetaRelacion = {
   userSelect: 'none' as const,
 }
 
+const normalizarTipoRelacionVisual = (tipo?: string): string => {
+  const valor = (tipo ?? 'ASOCIACION')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+  const equivalencias: Record<string, string> = {
+    ASSOCIATION: 'ASOCIACION',
+    AGGREGATION: 'AGREGACION',
+    COMPOSITION: 'COMPOSICION',
+    GENERALIZATION: 'HERENCIA',
+    GENERALIZACION: 'HERENCIA',
+    INHERITANCE: 'HERENCIA',
+    REALIZATION: 'REALIZACION',
+    DEPENDENCY: 'DEPENDENCIA',
+  }
+
+  return equivalencias[valor] ?? valor
+}
+
+const puntosPoligono = (
+  puntos: Array<{ x: number; y: number }>,
+): string => puntos.map((punto) => `${punto.x},${punto.y}`).join(' ')
+
 function RelacionUmlEdge({
   id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  markerEnd,
+  source,
+  target,
+  sourceX: sourceXFallback,
+  sourceY: sourceYFallback,
+  targetX: targetXFallback,
+  targetY: targetYFallback,
+  sourcePosition: sourcePositionFallback,
+  targetPosition: targetPositionFallback,
   style,
   data,
 }: EdgeProps) {
-  const [ruta, centroX, centroY] = getBezierPath({
+  // Enlace flotante estilo Enterprise Architect:
+  // el extremo de la relación se calcula contra TODO el perímetro de la clase,
+  // no contra un único punto central fijo.
+  const nodoOrigen = useInternalNode(source)
+  const nodoDestino = useInternalNode(target)
+
+  const obtenerInterseccionRectangulo = (
+    nodo: NonNullable<typeof nodoOrigen>,
+    otroNodo: NonNullable<typeof nodoOrigen>,
+  ) => {
+    const ancho = nodo.measured.width ?? 240
+    const alto = nodo.measured.height ?? 80
+    const anchoOtro = otroNodo.measured.width ?? 240
+    const altoOtro = otroNodo.measured.height ?? 80
+
+    const posicion = nodo.internals.positionAbsolute
+    const posicionOtro = otroNodo.internals.positionAbsolute
+
+    const centroX = posicion.x + ancho / 2
+    const centroY = posicion.y + alto / 2
+    const centroOtroX = posicionOtro.x + anchoOtro / 2
+    const centroOtroY = posicionOtro.y + altoOtro / 2
+
+    const deltaX = centroOtroX - centroX
+    const deltaY = centroOtroY - centroY
+
+    if (deltaX === 0 && deltaY === 0) {
+      return { x: centroX, y: centroY }
+    }
+
+    const escalaX =
+      deltaX === 0 ? Number.POSITIVE_INFINITY : ancho / 2 / Math.abs(deltaX)
+    const escalaY =
+      deltaY === 0 ? Number.POSITIVE_INFINITY : alto / 2 / Math.abs(deltaY)
+    const escala = Math.min(escalaX, escalaY)
+
+    return {
+      x: centroX + deltaX * escala,
+      y: centroY + deltaY * escala,
+    }
+  }
+
+  const obtenerLadoPerimetro = (
+    nodo: NonNullable<typeof nodoOrigen>,
+    punto: { x: number; y: number },
+  ): Position => {
+    const ancho = nodo.measured.width ?? 240
+    const alto = nodo.measured.height ?? 80
+    const posicion = nodo.internals.positionAbsolute
+
+    const distancias: Array<{ posicion: Position; distancia: number }> = [
+      { posicion: Position.Left, distancia: Math.abs(punto.x - posicion.x) },
+      {
+        posicion: Position.Right,
+        distancia: Math.abs(punto.x - (posicion.x + ancho)),
+      },
+      { posicion: Position.Top, distancia: Math.abs(punto.y - posicion.y) },
+      {
+        posicion: Position.Bottom,
+        distancia: Math.abs(punto.y - (posicion.y + alto)),
+      },
+    ]
+
+    distancias.sort((a, b) => a.distancia - b.distancia)
+    return distancias[0].posicion
+  }
+
+  let sourceX = sourceXFallback
+  let sourceY = sourceYFallback
+  let targetX = targetXFallback
+  let targetY = targetYFallback
+  let sourcePosition = sourcePositionFallback
+  let targetPosition = targetPositionFallback
+
+  if (nodoOrigen && nodoDestino) {
+    const puntoOrigen = obtenerInterseccionRectangulo(nodoOrigen, nodoDestino)
+    const puntoDestino = obtenerInterseccionRectangulo(nodoDestino, nodoOrigen)
+
+    sourceX = puntoOrigen.x
+    sourceY = puntoOrigen.y
+    targetX = puntoDestino.x
+    targetY = puntoDestino.y
+    sourcePosition = obtenerLadoPerimetro(nodoOrigen, puntoOrigen)
+    targetPosition = obtenerLadoPerimetro(nodoDestino, puntoDestino)
+  }
+
+  const [ruta, centroX, centroY] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
     targetX,
     targetY,
     targetPosition,
+    borderRadius: 0,
+    offset: 28,
   })
 
   const datos = data as DatosRelacionEdge | undefined
+  const tipo = normalizarTipoRelacionVisual(datos?.tipo)
 
-  const deltaX = targetX - sourceX
-  const deltaY = targetY - sourceY
-  const longitud = Math.hypot(deltaX, deltaY) || 1
+  const vectorExterior = (posicion: Position) => {
+    switch (posicion) {
+      case Position.Left:
+        return { x: -1, y: 0 }
+      case Position.Right:
+        return { x: 1, y: 0 }
+      case Position.Top:
+        return { x: 0, y: -1 }
+      case Position.Bottom:
+      default:
+        return { x: 0, y: 1 }
+    }
+  }
 
-  const direccionX = deltaX / longitud
-  const direccionY = deltaY / longitud
+  // Las decoraciones UML se orientan según el segmento ortogonal real que
+  // sale/entra de la clase. Así los triángulos, diamantes y flechas no quedan
+  // inclinados aunque el resto de la relación tenga varios giros de 90°.
+  const salidaOrigen = vectorExterior(sourcePosition)
+  const exteriorDestino = vectorExterior(targetPosition)
+  const entradaDestino = {
+    x: -exteriorDestino.x,
+    y: -exteriorDestino.y,
+  }
 
-  // Vector perpendicular a la relación. Sirve para separar el texto
-  // ligeramente de la línea, como en herramientas UML tradicionales.
-  const perpendicularX = -direccionY
-  const perpendicularY = direccionX
+  const perpendicularOrigen = {
+    x: -salidaOrigen.y,
+    y: salidaOrigen.x,
+  }
+  const perpendicularDestino = {
+    x: -entradaDestino.y,
+    y: entradaDestino.x,
+  }
 
-  // Las cardinalidades quedan cerca de cada extremo, no en el centro.
-  const distanciaDesdeClase = 28
-  const separacionDeLinea = 14
+  // IMPORTANTE:
+  // Esta lógica de Association Class se mantiene igual a la versión estable.
+  const rutaClaseAsociacion =
+    datos?.claseAsociacionX !== undefined &&
+    datos?.claseAsociacionY !== undefined
+      ? `M ${centroX},${centroY} L ${datos.claseAsociacionX},${datos.claseAsociacionY}`
+      : null
+
+  const esDiscontinua = tipo === 'REALIZACION' || tipo === 'DEPENDENCIA'
+
+  const estiloRelacion = {
+    ...style,
+    ...(esDiscontinua ? { strokeDasharray: '8 6' } : {}),
+  }
+
+  // Triángulo UML en el destino: generalización/herencia y realización.
+  const puntaTriangulo = { x: targetX, y: targetY }
+  const centroBaseTriangulo = {
+    x: targetX - entradaDestino.x * 18,
+    y: targetY - entradaDestino.y * 18,
+  }
+  const baseTrianguloA = {
+    x: centroBaseTriangulo.x + perpendicularDestino.x * 10,
+    y: centroBaseTriangulo.y + perpendicularDestino.y * 10,
+  }
+  const baseTrianguloB = {
+    x: centroBaseTriangulo.x - perpendicularDestino.x * 10,
+    y: centroBaseTriangulo.y - perpendicularDestino.y * 10,
+  }
+
+  // Diamante UML en el origen: agregación/composición.
+  const diamanteA = { x: sourceX, y: sourceY }
+  const diamanteB = {
+    x: sourceX + salidaOrigen.x * 10 + perpendicularOrigen.x * 7,
+    y: sourceY + salidaOrigen.y * 10 + perpendicularOrigen.y * 7,
+  }
+  const diamanteC = {
+    x: sourceX + salidaOrigen.x * 20,
+    y: sourceY + salidaOrigen.y * 20,
+  }
+  const diamanteD = {
+    x: sourceX + salidaOrigen.x * 10 - perpendicularOrigen.x * 7,
+    y: sourceY + salidaOrigen.y * 10 - perpendicularOrigen.y * 7,
+  }
+
+  // Flecha abierta UML en el destino: dependencia.
+  const flechaAbiertaA = {
+    x: targetX - entradaDestino.x * 14 + perpendicularDestino.x * 7,
+    y: targetY - entradaDestino.y * 14 + perpendicularDestino.y * 7,
+  }
+  const flechaAbiertaB = {
+    x: targetX - entradaDestino.x * 14 - perpendicularDestino.x * 7,
+    y: targetY - entradaDestino.y * 14 - perpendicularDestino.y * 7,
+  }
+
+  // Cardinalidades: se colocan junto al punto REAL del perímetro donde termina
+  // cada relación, no alrededor del centro fijo de la clase.
+  const distanciaDesdeClase = 22
+  const separacionDeLinea = 12
+  const perpendicularEtiquetaDestino = {
+    x: -exteriorDestino.y,
+    y: exteriorDestino.x,
+  }
 
   const origenX =
     sourceX +
-    direccionX * distanciaDesdeClase +
-    perpendicularX * separacionDeLinea
+    salidaOrigen.x * distanciaDesdeClase +
+    perpendicularOrigen.x * separacionDeLinea
 
   const origenY =
     sourceY +
-    direccionY * distanciaDesdeClase +
-    perpendicularY * separacionDeLinea
+    salidaOrigen.y * distanciaDesdeClase +
+    perpendicularOrigen.y * separacionDeLinea
 
   const destinoX =
-    targetX -
-    direccionX * distanciaDesdeClase +
-    perpendicularX * separacionDeLinea
+    targetX +
+    exteriorDestino.x * distanciaDesdeClase +
+    perpendicularEtiquetaDestino.x * separacionDeLinea
 
   const destinoY =
-    targetY -
-    direccionY * distanciaDesdeClase +
-    perpendicularY * separacionDeLinea
+    targetY +
+    exteriorDestino.y * distanciaDesdeClase +
+    perpendicularEtiquetaDestino.y * separacionDeLinea
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={ruta}
-        markerEnd={markerEnd}
-        style={style}
-      />
+      <BaseEdge id={id} path={ruta} style={estiloRelacion} />
+
+      {(tipo === 'HERENCIA' || tipo === 'REALIZACION') && (
+        <polygon
+          points={puntosPoligono([
+            puntaTriangulo,
+            baseTrianguloA,
+            baseTrianguloB,
+          ])}
+          fill="white"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      )}
+
+      {(tipo === 'AGREGACION' || tipo === 'COMPOSICION') && (
+        <polygon
+          points={puntosPoligono([
+            diamanteA,
+            diamanteB,
+            diamanteC,
+            diamanteD,
+          ])}
+          fill={tipo === 'COMPOSICION' ? 'currentColor' : 'white'}
+          stroke="currentColor"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      )}
+
+      {tipo === 'DEPENDENCIA' && (
+        <polyline
+          points={puntosPoligono([
+            flechaAbiertaA,
+            puntaTriangulo,
+            flechaAbiertaB,
+          ])}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      )}
+
+      {rutaClaseAsociacion && (
+        <BaseEdge
+          id={`${id}-clase-asociacion`}
+          path={rutaClaseAsociacion}
+          style={{
+            ...style,
+            strokeDasharray: '8 6',
+          }}
+        />
+      )}
 
       <EdgeLabelRenderer>
         {datos?.multiplicidadOrigen && (
@@ -316,8 +570,9 @@ function RelacionUmlEdge({
             style={{
               ...estiloEtiquetaRelacion,
               left: centroX,
-              top: centroY,
+              top: centroY - 14,
               fontSize: 12,
+              fontWeight: 600,
             }}
           >
             {datos.nombre}
@@ -366,20 +621,30 @@ const construirNodos = (modelo: ModeloCompleto): Node[] => {
 }
 
 const construirAristas = (modelo: ModeloCompleto): Edge[] => {
-  return modelo.relaciones.map((relacion) => ({
-    id: relacion.id,
-    source: relacion.claseOrigenId,
-    target: relacion.claseDestinoId,
-    type: 'relacionUml',
-    data: {
-      nombre: relacion.nombre?.trim() || relacion.tipo,
-      multiplicidadOrigen: relacion.multiplicidadOrigen ?? '',
-      multiplicidadDestino: relacion.multiplicidadDestino ?? '',
-    },
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-    },
-  }))
+  return modelo.relaciones.map((relacion) => {
+    const claseAsociacion = relacion.claseAsociacionId
+      ? modelo.clases.find((clase) => clase.id === relacion.claseAsociacionId)
+      : undefined
+
+    return {
+      id: relacion.id,
+      source: relacion.claseOrigenId,
+      target: relacion.claseDestinoId,
+      type: 'relacionUml',
+      data: {
+        nombre: relacion.nombre?.trim() || '',
+        tipo: relacion.tipo,
+        multiplicidadOrigen: relacion.multiplicidadOrigen ?? '',
+        multiplicidadDestino: relacion.multiplicidadDestino ?? '',
+        claseAsociacionX: claseAsociacion
+          ? claseAsociacion.posicionX + 120
+          : undefined,
+        claseAsociacionY: claseAsociacion
+          ? claseAsociacion.posicionY
+          : undefined,
+      },
+    }
+  })
 }
 
 function App() {
@@ -426,6 +691,9 @@ function App() {
   const reconocedorVozRef = useRef<ReconocedorVoz | null>(null)
   const [escuchandoVoz, setEscuchandoVoz] = useState(false)
   const [errorVoz, setErrorVoz] = useState('')
+  const inputImagenRef = useRef<HTMLInputElement | null>(null)
+  const [procesandoImagen, setProcesandoImagen] = useState(false)
+  const [errorImagen, setErrorImagen] = useState('')
 
   const [mostrarFormularioClase, setMostrarFormularioClase] = useState(false)
   const [nombreClase, setNombreClase] = useState('')
@@ -891,13 +1159,14 @@ function App() {
 
     setEscuchandoVoz(false)
     setErrorVoz('')
+    setErrorImagen('')
     setMensajeIa('')
     setErrorIa('')
     setHistorialIa([])
   }
 
   const alternarReconocimientoVoz = () => {
-    if (procesandoIa || estadoConexion !== 'conectado') {
+    if (procesandoIa || procesandoImagen || estadoConexion !== 'conectado') {
       return
     }
 
@@ -975,6 +1244,121 @@ function App() {
       reconocedorVozRef.current = null
       setEscuchandoVoz(false)
       setErrorVoz('No se pudo iniciar el reconocimiento de voz.')
+    }
+  }
+
+  const abrirSelectorImagen = () => {
+    if (
+      procesandoIa ||
+      procesandoImagen ||
+      estadoConexion !== 'conectado'
+    ) {
+      return
+    }
+
+    setErrorImagen('')
+    inputImagenRef.current?.click()
+  }
+
+  const enviarImagenIa = async (evento: ChangeEvent<HTMLInputElement>) => {
+    const archivo = evento.target.files?.[0]
+    evento.target.value = ''
+
+    if (!archivo) {
+      return
+    }
+
+    if (!archivo.type.startsWith('image/')) {
+      setErrorImagen('Selecciona una imagen válida del diagrama UML.')
+      return
+    }
+
+    if (!sesionColaborativa) {
+      setErrorImagen(
+        'Inicia una sesión colaborativa para editar el modelo desde una imagen.',
+      )
+      return
+    }
+
+    if (estadoConexion !== 'conectado') {
+      setErrorImagen(
+        'La sesión colaborativa debe estar conectada antes de analizar una imagen.',
+      )
+      return
+    }
+
+    const instruccion =
+      mensajeIa.trim() ||
+      'Interpreta esta imagen como un diagrama UML de clases y aplica al modelo los cambios claramente identificables. No inventes elementos que no se vean con suficiente claridad.'
+
+    const mensajeUsuario: MensajeChatIa = {
+      id: crypto.randomUUID(),
+      autor: 'usuario',
+      texto: mensajeIa.trim()
+        ? `📷 Imagen: ${archivo.name}\n${mensajeIa.trim()}`
+        : `📷 Imagen UML: ${archivo.name}`,
+    }
+
+    try {
+      setProcesandoImagen(true)
+      setErrorImagen('')
+      setErrorIa('')
+      setHistorialIa((actual) => [...actual, mensajeUsuario])
+      setMensajeIa('')
+
+      const formulario = new FormData()
+      formulario.append('archivo', archivo)
+      formulario.append('clienteId', clienteIdRef.current)
+      formulario.append('mensaje', instruccion)
+
+      const respuesta = await fetch(
+        `${API_URL}/api/ia/sesiones/${encodeURIComponent(
+          sesionColaborativa.codigo,
+        )}/imagen`,
+        {
+          method: 'POST',
+          body: formulario,
+        },
+      )
+
+      if (!respuesta.ok) {
+        let mensajeError =
+          'No se pudo interpretar la imagen con el asistente IA.'
+
+        try {
+          const detalle = await respuesta.json()
+
+          if (detalle?.mensaje) {
+            mensajeError = detalle.mensaje
+          }
+        } catch {
+          // Conservamos el mensaje general.
+        }
+
+        throw new Error(mensajeError)
+      }
+
+      const resultado: ChatIaResponse = await respuesta.json()
+
+      setModeloAbierto(resultado.modelo)
+
+      setHistorialIa((actual) => [
+        ...actual,
+        {
+          id: crypto.randomUUID(),
+          autor: 'ia',
+          texto: resultado.mensaje,
+          acciones: resultado.accionesEjecutadas,
+        },
+      ])
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorImagen(error.message)
+      } else {
+        setErrorImagen('Ocurrió un error al procesar la imagen del diagrama.')
+      }
+    } finally {
+      setProcesandoImagen(false)
     }
   }
 
@@ -1113,6 +1497,10 @@ function App() {
       multiplicidadOrigen: relacion.multiplicidadOrigen,
       multiplicidadDestino: relacion.multiplicidadDestino,
       nombre: relacion.nombre,
+      claseAsociacionId: relacion.claseAsociacionClave
+        ? clavesAIds.get(relacion.claseAsociacionClave) ??
+          relacion.claseAsociacionClave
+        : null,
     }))
 
     return {
@@ -1241,6 +1629,7 @@ function App() {
       multiplicidadOrigen: relacion.multiplicidadOrigen,
       multiplicidadDestino: relacion.multiplicidadDestino,
       nombre: relacion.nombre,
+      claseAsociacionClave: relacion.claseAsociacionId,
     })),
   })
 
@@ -1689,6 +2078,7 @@ function App() {
           multiplicidadOrigen: relacion.multiplicidadOrigen,
           multiplicidadDestino: relacion.multiplicidadDestino,
           nombre: relacion.nombre,
+          claseAsociacionClave: relacion.claseAsociacionId,
         })),
       }
 
@@ -1862,6 +2252,7 @@ function App() {
           multiplicidadOrigen: relacion.multiplicidadOrigen,
           multiplicidadDestino: relacion.multiplicidadDestino,
           nombre: relacion.nombre,
+          claseAsociacionClave: relacion.claseAsociacionId,
         })),
       }
 
@@ -1904,7 +2295,8 @@ function App() {
     const relacionesAfectadas = modeloAbierto.relaciones.filter(
       (relacion) =>
         relacion.claseOrigenId === clase.id ||
-        relacion.claseDestinoId === clase.id,
+        relacion.claseDestinoId === clase.id ||
+        relacion.claseAsociacionId === clase.id,
     ).length
 
     const mensajeConfirmacion =
@@ -1995,7 +2387,8 @@ function App() {
           .filter(
             (relacion) =>
               relacion.claseOrigenId !== clase.id &&
-              relacion.claseDestinoId !== clase.id,
+              relacion.claseDestinoId !== clase.id &&
+              relacion.claseAsociacionId !== clase.id,
           )
           .map((relacion) => ({
             id: relacion.id,
@@ -2005,6 +2398,7 @@ function App() {
             multiplicidadOrigen: relacion.multiplicidadOrigen,
             multiplicidadDestino: relacion.multiplicidadDestino,
             nombre: relacion.nombre,
+            claseAsociacionClave: relacion.claseAsociacionId,
           })),
       }
 
@@ -2207,6 +2601,7 @@ function App() {
           multiplicidadOrigen: relacion.multiplicidadOrigen,
           multiplicidadDestino: relacion.multiplicidadDestino,
           nombre: relacion.nombre,
+          claseAsociacionClave: relacion.claseAsociacionId,
         })),
       }
 
@@ -2342,6 +2737,7 @@ function App() {
           multiplicidadOrigen: relacion.multiplicidadOrigen,
           multiplicidadDestino: relacion.multiplicidadDestino,
           nombre: relacion.nombre,
+          claseAsociacionClave: relacion.claseAsociacionId,
         })),
       }
 
@@ -2441,6 +2837,7 @@ function App() {
                     multiplicidadDestino:
                       multiplicidadDestinoRelacion.trim() || null,
                     nombre: nombreRelacion.trim() || null,
+                    claseAsociacionId: null,
                   }
                 : {
                     relacionId: relacionEditandoId,
@@ -2450,6 +2847,10 @@ function App() {
                     multiplicidadDestino:
                       multiplicidadDestinoRelacion.trim() || null,
                     nombre: nombreRelacion.trim() || null,
+                    claseAsociacionId:
+                      modeloAbierto.relaciones.find(
+                        (relacion) => relacion.id === relacionEditandoId,
+                      )?.claseAsociacionId ?? null,
                   },
           }),
         })
@@ -2479,6 +2880,7 @@ function App() {
             multiplicidadOrigen: multiplicidadOrigenRelacion.trim() || null,
             multiplicidadDestino: multiplicidadDestinoRelacion.trim() || null,
             nombre: nombreRelacion.trim() || null,
+            claseAsociacionClave: relacion.claseAsociacionId,
           }
         }
 
@@ -2490,6 +2892,7 @@ function App() {
           multiplicidadOrigen: relacion.multiplicidadOrigen,
           multiplicidadDestino: relacion.multiplicidadDestino,
           nombre: relacion.nombre,
+          claseAsociacionClave: relacion.claseAsociacionId,
         }
       })
 
@@ -2530,6 +2933,7 @@ function App() {
                   multiplicidadDestino:
                     multiplicidadDestinoRelacion.trim() || null,
                   nombre: nombreRelacion.trim() || null,
+                  claseAsociacionClave: null,
                 },
               ]
             : relacionesExistentes,
@@ -2677,6 +3081,7 @@ function App() {
             multiplicidadOrigen: relacionActual.multiplicidadOrigen,
             multiplicidadDestino: relacionActual.multiplicidadDestino,
             nombre: relacionActual.nombre,
+            claseAsociacionClave: relacionActual.claseAsociacionId,
           })),
       }
 
@@ -2994,8 +3399,8 @@ function App() {
               <div style={{ marginBottom: 12 }}>
                 <h3 style={{ margin: 0 }}>Asistente IA</h3>
                 <p style={{ margin: '6px 0 0', color: '#526071' }}>
-                  Describe en lenguaje natural los cambios que quieres realizar
-                  en el diagrama UML.
+                  Edita el diagrama mediante texto, voz o una imagen UML tomada
+                  desde la cámara o seleccionada desde el dispositivo.
                 </p>
               </div>
 
@@ -3013,6 +3418,15 @@ function App() {
                 </p>
               ) : (
                 <>
+                  <input
+                    ref={inputImagenRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={enviarImagenIa}
+                    style={{ display: 'none' }}
+                  />
+
                   {historialIa.length > 0 && (
                     <div
                       style={{
@@ -3082,7 +3496,9 @@ function App() {
                       maxLength={1000}
                       placeholder="Ej: Crea una clase Cliente con id UUID como identificador y nombre String"
                       disabled={
-                        procesandoIa || estadoConexion !== 'conectado'
+                        procesandoIa ||
+                        procesandoImagen ||
+                        estadoConexion !== 'conectado'
                       }
                       style={{
                         width: '100%',
@@ -3097,6 +3513,10 @@ function App() {
 
                     {errorVoz && (
                       <p className="error-formulario">{errorVoz}</p>
+                    )}
+
+                    {errorImagen && (
+                      <p className="error-formulario">{errorImagen}</p>
                     )}
 
                     {errorIa && (
@@ -3118,13 +3538,16 @@ function App() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 10,
+                          flexWrap: 'wrap',
                         }}
                       >
                         <button
                           type="button"
                           onClick={alternarReconocimientoVoz}
                           disabled={
-                            procesandoIa || estadoConexion !== 'conectado'
+                            procesandoIa ||
+                            procesandoImagen ||
+                            estadoConexion !== 'conectado'
                           }
                           aria-pressed={escuchandoVoz}
                           style={{
@@ -3132,7 +3555,9 @@ function App() {
                             borderRadius: 8,
                             border: '1px solid #cfd8e3',
                             cursor:
-                              procesandoIa || estadoConexion !== 'conectado'
+                              procesandoIa ||
+                              procesandoImagen ||
+                              estadoConexion !== 'conectado'
                                 ? 'not-allowed'
                                 : 'pointer',
                             fontWeight: 600,
@@ -3146,6 +3571,33 @@ function App() {
                             Escuchando...
                           </span>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={abrirSelectorImagen}
+                          disabled={
+                            procesandoIa ||
+                            procesandoImagen ||
+                            estadoConexion !== 'conectado'
+                          }
+                          style={{
+                            padding: '9px 14px',
+                            borderRadius: 8,
+                            border: '1px solid #cfd8e3',
+                            cursor:
+                              procesandoIa ||
+                              procesandoImagen ||
+                              estadoConexion !== 'conectado'
+                                ? 'not-allowed'
+                                : 'pointer',
+                            fontWeight: 600,
+                          }}
+                          title="En el celular abre la cámara; en PC permite elegir una imagen."
+                        >
+                          {procesandoImagen
+                            ? 'Analizando imagen...'
+                            : '📷 Foto / imagen'}
+                        </button>
                       </div>
 
                       <button
@@ -3153,6 +3605,7 @@ function App() {
                         type="submit"
                         disabled={
                           procesandoIa ||
+                          procesandoImagen ||
                           estadoConexion !== 'conectado' ||
                           !mensajeIa.trim()
                         }
@@ -3291,16 +3744,20 @@ function App() {
                   <div className="campo">
                     <label htmlFor="tipoRelacion">Tipo</label>
 
-                    <input
+                    <select
                       id="tipoRelacion"
-                      type="text"
                       value={tipoRelacion}
                       onChange={(evento) =>
                         setTipoRelacion(evento.target.value)
                       }
-                      maxLength={30}
-                      placeholder="Ej: ASOCIACION"
-                    />
+                    >
+                      <option value="ASOCIACION">Asociación</option>
+                      <option value="AGREGACION">Agregación</option>
+                      <option value="COMPOSICION">Composición</option>
+                      <option value="HERENCIA">Generalización / Herencia</option>
+                      <option value="REALIZACION">Realización</option>
+                      <option value="DEPENDENCIA">Dependencia</option>
+                    </select>
                   </div>
 
                   <div className="campo">
@@ -3416,6 +3873,15 @@ function App() {
                             Multiplicidad: {relacion.multiplicidadOrigen ?? '-'} →{' '}
                             {relacion.multiplicidadDestino ?? '-'}
                           </span>
+
+                          {relacion.claseAsociacionId && (
+                            <span>
+                              Clase de asociación:{' '}
+                              {modeloAbierto.clases.find(
+                                (clase) => clase.id === relacion.claseAsociacionId,
+                              )?.nombre ?? 'No disponible'}
+                            </span>
+                          )}
                         </div>
 
                         <div className="acciones-relacion">
