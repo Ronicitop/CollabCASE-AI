@@ -24,6 +24,8 @@ import { API_URL, WS_URL } from './config'
 import { useOnlineStatus } from './offline/useOnlineStatus'
 import {
   contarOperacionesPendientes,
+  eliminarModeloOffline,
+  eliminarProyectoOffline,
   guardarModeloOffline,
   guardarModeloPendienteSincronizacion,
   guardarProyectoOffline,
@@ -654,6 +656,12 @@ function App() {
   const [error, setError] = useState('')
   const [proyectosDesdeOffline, setProyectosDesdeOffline] = useState(false)
 
+  const [eliminandoProyectoId, setEliminandoProyectoId] =
+    useState<string | null>(null)
+
+  const [errorEliminacionProyecto, setErrorEliminacionProyecto] =
+    useState('')
+
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
   const [nombre, setNombre] = useState('')
   const [descripcion, setDescripcion] = useState('')
@@ -912,6 +920,68 @@ function App() {
     setErrorCreacion('')
     setMostrarFormulario(false)
   }
+
+  const eliminarProyecto = async (proyecto: Proyecto) => {
+  if (!online) {
+    setErrorEliminacionProyecto(
+      'Eliminar proyectos requiere conexión con el servidor.',
+    )
+    return
+  }
+
+  const confirmar = window.confirm(
+    `¿Eliminar definitivamente el proyecto "${proyecto.nombre}"?\n\n` +
+      'Se eliminarán también su modelo UML, clases, atributos, relaciones y sesiones colaborativas asociadas.\n\n' +
+      'Esta acción no se puede deshacer.',
+  )
+
+  if (!confirmar) {
+    return
+  }
+
+  try {
+    setEliminandoProyectoId(proyecto.id)
+    setErrorEliminacionProyecto('')
+
+    const respuesta = await fetch(
+      `${API_URL}/api/proyectos/${proyecto.id}`,
+      {
+        method: 'DELETE',
+      },
+    )
+
+    if (!respuesta.ok) {
+      throw new Error(
+        await obtenerMensajeErrorHttp(
+          respuesta,
+          'No se pudo eliminar el proyecto.',
+        ),
+      )
+    }
+
+    await Promise.all([
+      eliminarProyectoOffline(proyecto.id),
+      eliminarModeloOffline(proyecto.id),
+      limpiarOperacionesProyecto(proyecto.id),
+    ])
+
+    setProyectos((actuales) =>
+      actuales.filter(
+        (proyectoActual) => proyectoActual.id !== proyecto.id,
+      ),
+    )
+
+    setErrorEliminacionProyecto('')
+  } catch (error) {
+    setErrorEliminacionProyecto(
+      error instanceof Error
+        ? error.message
+        : 'Ocurrió un error al eliminar el proyecto.',
+    )
+  } finally {
+    setEliminandoProyectoId(null)
+  }
+}
 
   const obtenerModeloCompleto = async (
     proyectoId: string,
@@ -4470,6 +4540,12 @@ function App() {
           </div>
         )}
 
+        {errorEliminacionProyecto && (
+          <div className="mensaje error">
+            <p>{errorEliminacionProyecto}</p>
+          </div>
+        )}
+
         {!cargando && !error && proyectos.length > 0 && (
           <section className="lista-proyectos">
             {proyectos.map((proyecto) => (
@@ -4481,14 +4557,59 @@ function App() {
                   </p>
                 </div>
 
-                <button
-                  className="boton-abrir"
-                  type="button"
-                  onClick={() => abrirProyecto(proyecto)}
-                  disabled={abriendoId === proyecto.id}
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 10,
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                  }}
                 >
-                  {abriendoId === proyecto.id ? 'Abriendo...' : 'Abrir'}
-                </button>
+                  <button
+                    className="boton-abrir"
+                    type="button"
+                    onClick={() => abrirProyecto(proyecto)}
+                    disabled={
+                      abriendoId === proyecto.id ||
+                      eliminandoProyectoId !== null
+                    }
+                  >
+                    {abriendoId === proyecto.id ? 'Abriendo...' : 'Abrir'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void eliminarProyecto(proyecto)}
+                    disabled={
+                      !online ||
+                      eliminandoProyectoId !== null ||
+                      abriendoId !== null
+                    }
+                    style={{
+                      background: '#b91c1c',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '10px 14px',
+                      fontWeight: 700,
+                      cursor:
+                        !online ||
+                          eliminandoProyectoId !== null ||
+                          abriendoId !== null
+                          ? 'not-allowed'
+                          : 'pointer',
+                    }}
+                    title={
+                      !online
+                        ? 'Eliminar proyectos requiere conexión.'
+                        : 'Eliminar proyecto permanentemente'
+                    }
+                  >
+                    {eliminandoProyectoId === proyecto.id
+                      ? 'Eliminando...'
+                      : 'Eliminar'}
+                  </button>
+                </div>
               </article>
             ))}
           </section>

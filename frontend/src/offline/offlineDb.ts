@@ -119,6 +119,8 @@ export async function guardarProyectosOffline(
   const db = await obtenerDb()
   const tx = db.transaction(STORE_PROYECTOS, 'readwrite')
 
+  await tx.store.clear()
+
   for (const proyecto of proyectos) {
     await tx.store.put(proyecto)
   }
