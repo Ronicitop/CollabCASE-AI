@@ -17,6 +17,8 @@ import com.collabcase.modelado.dto.RelacionDiagramaResponse;
 import com.collabcase.modelado.servicio.ModeloDiagramaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
@@ -30,6 +32,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class ChatIaService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatIaService.class);
 
     private final SesionColaborativaService sesionColaborativaService;
     private final ModeloDiagramaService modeloDiagramaService;
@@ -48,11 +52,36 @@ public class ChatIaService {
         ModeloCompletoResponse modeloActual =
                 modeloDiagramaService.obtenerModeloCompleto(sesion.proyectoId());
 
+        log.info(
+                "[IA-TRACE] TEXTO recibido. sesion={}, mensaje={}",
+                codigoSesion,
+                request.mensaje()
+        );
+        log.info(
+                "[IA-TRACE] MODELO ANTES: {}",
+                resumirModelo(modeloActual)
+        );
+
         PlanIa plan =
                 interpretadorOpenAiService.interpretar(
                         request.mensaje(),
                         modeloActual
                 );
+
+        log.info(
+                "[IA-TRACE] PLAN ORIGINAL TEXTO: {}",
+                aJsonSeguro(plan)
+        );
+
+        plan = normalizarPlanComun(
+                plan,
+                modeloActual
+        );
+
+        log.info(
+                "[IA-TRACE] PLAN NORMALIZADO TEXTO: {}",
+                aJsonSeguro(plan)
+        );
 
         return ejecutarPlan(
                 codigoSesion,
@@ -74,6 +103,17 @@ public class ChatIaService {
         ModeloCompletoResponse modeloActual =
                 modeloDiagramaService.obtenerModeloCompleto(sesion.proyectoId());
 
+        log.info(
+                "[IA-TRACE] IMAGEN recibida. sesion={}, archivo={}, mensaje={}",
+                codigoSesion,
+                archivo != null ? archivo.getOriginalFilename() : null,
+                mensaje
+        );
+        log.info(
+                "[IA-TRACE] MODELO ANTES IMAGEN: {}",
+                resumirModelo(modeloActual)
+        );
+
         PlanIa plan =
                 interpretadorOpenAiService.interpretarImagen(
                         archivo,
@@ -81,9 +121,19 @@ public class ChatIaService {
                         modeloActual
                 );
 
+        log.info(
+                "[IA-TRACE] PLAN ORIGINAL IMAGEN: {}",
+                aJsonSeguro(plan)
+        );
+
         plan = normalizarPlanImagen(
                 plan,
                 modeloActual
+        );
+
+        log.info(
+                "[IA-TRACE] PLAN NORMALIZADO IMAGEN: {}",
+                aJsonSeguro(plan)
         );
 
         return ejecutarPlan(
@@ -105,8 +155,13 @@ public class ChatIaService {
         }
 
         List<OperacionIa> operaciones =
-                normalizarTiposAtributosImagen(
+                normalizarTiposOperacionRelacion(
                         plan.operaciones()
+                );
+
+        operaciones =
+                normalizarTiposAtributosImagen(
+                        operaciones
                 );
 
         operaciones =
@@ -115,10 +170,583 @@ public class ChatIaService {
                         modeloActual
                 );
 
+        operaciones =
+                normalizarClaseAsociacionSobreRelacionExistente(
+                        operaciones,
+                        modeloActual
+                );
+
+        operaciones =
+                eliminarCreacionesRedundantesParaClaseAsociacion(
+                        operaciones
+                );
+
+        operaciones =
+                protegerRelacionBaseClaseAsociacion(
+                        operaciones,
+                        modeloActual
+                );
+
+        operaciones =
+                eliminarRelacionesAuxiliaresClaseAsociacionDelPlan(
+                        operaciones
+                );
+
         return new PlanIa(
                 plan.mensaje(),
                 List.copyOf(operaciones)
         );
+    }
+
+    /*
+     * Normalización defensiva usada también por comandos de texto.
+     *
+     * La IA debe devolver en "tipo" una ACCIÓN (CREAR_RELACION,
+     * ACTUALIZAR_RELACION, etc.) y en "tipoRelacion" el tipo UML
+     * (ASOCIACION, HERENCIA, ...). Si por error devuelve directamente
+     * ASOCIACION/HERENCIA/etc. como operación, lo corregimos aquí.
+     *
+     * También permite evolucionar una relación normal existente a una
+     * relación con clase de asociación sin crear una relación duplicada.
+     */
+    private PlanIa normalizarPlanComun(
+            PlanIa plan,
+            ModeloCompletoResponse modeloActual
+    ) {
+        if (plan == null || plan.operaciones() == null
+                || plan.operaciones().isEmpty()) {
+            return plan;
+        }
+
+        List<OperacionIa> operaciones =
+                normalizarTiposOperacionRelacion(
+                        plan.operaciones()
+                );
+
+        operaciones =
+                normalizarClaseAsociacionSobreRelacionExistente(
+                        operaciones,
+                        modeloActual
+                );
+
+        operaciones =
+                eliminarCreacionesRedundantesParaClaseAsociacion(
+                        operaciones
+                );
+
+        operaciones =
+                protegerRelacionBaseClaseAsociacion(
+                        operaciones,
+                        modeloActual
+                );
+
+        operaciones =
+                eliminarRelacionesAuxiliaresClaseAsociacionDelPlan(
+                        operaciones
+                );
+
+        return new PlanIa(
+                plan.mensaje(),
+                List.copyOf(operaciones)
+        );
+    }
+
+    /*
+     * Evita un caso que puede devolver la IA en dos pasos para una misma pareja:
+     *
+     *   1) CREAR_RELACION Venta--Producto
+     *   2) ACTUALIZAR_RELACION Venta--Producto con claseAsociacion=DetalleVenta
+     *
+     * Si Venta--Producto ya existe, ejecutar el paso 1 crea una relación paralela y
+     * el paso 2 queda ambiguo. Cuando el plan contiene una operación que asigna una
+     * clase de asociación a una pareja de clases, cualquier CREAR_RELACION adicional
+     * y sin claseAsociacion para esa misma pareja es redundante y se descarta.
+     */
+    private List<OperacionIa> eliminarCreacionesRedundantesParaClaseAsociacion(
+            List<OperacionIa> operaciones
+    ) {
+        List<OperacionIa> resultado = new ArrayList<>();
+
+        for (OperacionIa operacion : operaciones) {
+            if (operacion == null
+                    || !esTipoOperacion(operacion, "CREAR_RELACION")
+                    || tieneTexto(operacion.claseAsociacion())
+                    || !tieneTexto(operacion.claseOrigen())
+                    || !tieneTexto(operacion.claseDestino())) {
+
+                resultado.add(operacion);
+                continue;
+            }
+
+            boolean existeAsignacionClaseAsociacionMismaPareja =
+                    operaciones.stream()
+                            .filter(otra -> otra != operacion)
+                            .anyMatch(otra ->
+                                    esOperacionRelacion(otra)
+                                            && tieneTexto(otra.claseAsociacion())
+                                            && mismaParejaClases(
+                                            operacion,
+                                            otra
+                                    )
+                            );
+
+            if (!existeAsignacionClaseAsociacionMismaPareja) {
+                resultado.add(operacion);
+            }
+        }
+
+        return resultado;
+    }
+
+    private boolean esOperacionRelacion(OperacionIa operacion) {
+        return esTipoOperacion(operacion, "CREAR_RELACION")
+                || esTipoOperacion(operacion, "ACTUALIZAR_RELACION")
+                || esTipoOperacion(operacion, "ELIMINAR_RELACION");
+    }
+
+    private boolean mismaParejaClases(
+            OperacionIa primera,
+            OperacionIa segunda
+    ) {
+        if (primera == null
+                || segunda == null
+                || !tieneTexto(primera.claseOrigen())
+                || !tieneTexto(primera.claseDestino())
+                || !tieneTexto(segunda.claseOrigen())
+                || !tieneTexto(segunda.claseDestino())) {
+            return false;
+        }
+
+        boolean mismoSentido =
+                coincideClase(
+                        primera.claseOrigen(),
+                        segunda.claseOrigen()
+                ) && coincideClase(
+                        primera.claseDestino(),
+                        segunda.claseDestino()
+                );
+
+        boolean sentidoInverso =
+                coincideClase(
+                        primera.claseOrigen(),
+                        segunda.claseDestino()
+                ) && coincideClase(
+                        primera.claseDestino(),
+                        segunda.claseOrigen()
+                );
+
+        return mismoSentido || sentidoInverso;
+    }
+
+    /*
+     * Protege la relación base cuando la IA quiere convertirla en una
+     * Association Class.
+     *
+     * Algunos planes de IA pueden venir así:
+     *
+     *   1) ELIMINAR_RELACION Venta--Producto
+     *   2) CREAR_RELACION / ACTUALIZAR_RELACION Venta--Producto
+     *      con claseAsociacion=DetalleVenta
+     *
+     * Si Venta--Producto ya existe y el paso 2 representa una actualización
+     * de esa misma relación, ejecutar primero el paso 1 hace que el paso 2
+     * falle con "No se encontró la relación UML indicada".
+     *
+     * Por eso, cuando existe UNA sola relación base entre las clases y el plan
+     * contiene una asignación de clase de asociación para esa misma pareja,
+     * descartamos el ELIMINAR_RELACION previo y conservamos la actualización.
+     */
+    private List<OperacionIa> protegerRelacionBaseClaseAsociacion(
+            List<OperacionIa> operaciones,
+            ModeloCompletoResponse modeloActual
+    ) {
+        List<OperacionIa> resultado = new ArrayList<>();
+
+        for (OperacionIa operacion : operaciones) {
+            if (operacion == null
+                    || !esTipoOperacion(operacion, "ELIMINAR_RELACION")
+                    || !tieneTexto(operacion.claseOrigen())
+                    || !tieneTexto(operacion.claseDestino())) {
+
+                resultado.add(operacion);
+                continue;
+            }
+
+            boolean existeAsignacionClaseAsociacionMismaPareja =
+                    operaciones.stream()
+                            .filter(otra -> otra != operacion)
+                            .anyMatch(otra ->
+                                    (esTipoOperacion(otra, "CREAR_RELACION")
+                                            || esTipoOperacion(
+                                            otra,
+                                            "ACTUALIZAR_RELACION"
+                                    ))
+                                            && tieneTexto(
+                                            otra.claseAsociacion()
+                                    )
+                                            && mismaParejaClases(
+                                            operacion,
+                                            otra
+                                    )
+                            );
+
+            if (!existeAsignacionClaseAsociacionMismaPareja) {
+                resultado.add(operacion);
+                continue;
+            }
+
+            RelacionDiagramaResponse relacionBase =
+                    buscarRelacionUnicaEntreClases(
+                            modeloActual,
+                            operacion.claseOrigen(),
+                            operacion.claseDestino()
+                    );
+
+            /*
+             * Solo omitimos el borrado cuando realmente existe una única
+             * relación base. Si no existe o hay más de una, no alteramos el
+             * plan porque podría tratarse de una corrección legítima.
+             */
+            if (relacionBase == null) {
+                resultado.add(operacion);
+            }
+        }
+
+        return resultado;
+    }
+
+    /*
+     * Una Association Class NO se representa creando asociaciones normales
+     * A--C y B--C. Si el mismo plan contiene una operación que asigna
+     * claseAsociacion=C a la relación principal A--B, descartamos cualquier
+     * CREAR_RELACION auxiliar A--C o B--C generado por la IA.
+     */
+    private List<OperacionIa> eliminarRelacionesAuxiliaresClaseAsociacionDelPlan(
+            List<OperacionIa> operaciones
+    ) {
+        List<OperacionIa> resultado = new ArrayList<>();
+
+        for (OperacionIa operacion : operaciones) {
+            if (operacion == null
+                    || !esTipoOperacion(operacion, "CREAR_RELACION")
+                    || tieneTexto(operacion.claseAsociacion())
+                    || !tieneTexto(operacion.claseOrigen())
+                    || !tieneTexto(operacion.claseDestino())) {
+
+                resultado.add(operacion);
+                continue;
+            }
+
+            boolean esAuxiliarDeAssociationClass =
+                    operaciones.stream()
+                            .filter(otra -> otra != operacion)
+                            .anyMatch(otra ->
+                                    (esTipoOperacion(
+                                            otra,
+                                            "CREAR_RELACION"
+                                    ) || esTipoOperacion(
+                                            otra,
+                                            "ACTUALIZAR_RELACION"
+                                    ))
+                                            && tieneTexto(
+                                            otra.claseAsociacion()
+                                    )
+                                            && tieneTexto(
+                                            otra.claseOrigen()
+                                    )
+                                            && tieneTexto(
+                                            otra.claseDestino()
+                                    )
+                                            && esRelacionAuxiliarDeAsignacion(
+                                            operacion,
+                                            otra
+                                    )
+                            );
+
+            if (!esAuxiliarDeAssociationClass) {
+                resultado.add(operacion);
+            }
+        }
+
+        return resultado;
+    }
+
+    private boolean esRelacionAuxiliarDeAsignacion(
+            OperacionIa posibleAuxiliar,
+            OperacionIa asignacion
+    ) {
+        String claseAsociacion =
+                asignacion.claseAsociacion();
+
+        String extremoA =
+                asignacion.claseOrigen();
+
+        String extremoB =
+                asignacion.claseDestino();
+
+        if (!tieneTexto(claseAsociacion)
+                || !tieneTexto(extremoA)
+                || !tieneTexto(extremoB)) {
+            return false;
+        }
+
+        return esPareja(
+                posibleAuxiliar,
+                claseAsociacion,
+                extremoA
+        ) || esPareja(
+                posibleAuxiliar,
+                claseAsociacion,
+                extremoB
+        );
+    }
+
+    private boolean esPareja(
+            OperacionIa operacion,
+            String claseA,
+            String claseB
+    ) {
+        if (operacion == null
+                || !tieneTexto(operacion.claseOrigen())
+                || !tieneTexto(operacion.claseDestino())) {
+            return false;
+        }
+
+        boolean mismoSentido =
+                coincideClase(
+                        operacion.claseOrigen(),
+                        claseA
+                ) && coincideClase(
+                        operacion.claseDestino(),
+                        claseB
+                );
+
+        boolean sentidoInverso =
+                coincideClase(
+                        operacion.claseOrigen(),
+                        claseB
+                ) && coincideClase(
+                        operacion.claseDestino(),
+                        claseA
+                );
+
+        return mismoSentido || sentidoInverso;
+    }
+
+    private List<OperacionIa> normalizarTiposOperacionRelacion(
+            List<OperacionIa> operaciones
+    ) {
+        List<OperacionIa> resultado = new ArrayList<>();
+
+        for (OperacionIa operacion : operaciones) {
+            if (operacion == null || operacion.tipo() == null) {
+                resultado.add(operacion);
+                continue;
+            }
+
+            String tipoRecibido =
+                    operacion.tipo()
+                            .trim()
+                            .toUpperCase(Locale.ROOT);
+
+            boolean tipoUmlEnCampoOperacion =
+                    "ASOCIACION".equals(tipoRecibido)
+                            || "AGREGACION".equals(tipoRecibido)
+                            || "COMPOSICION".equals(tipoRecibido)
+                            || "HERENCIA".equals(tipoRecibido)
+                            || "GENERALIZACION".equals(tipoRecibido)
+                            || "DEPENDENCIA".equals(tipoRecibido)
+                            || "REALIZACION".equals(tipoRecibido);
+
+            if (!tipoUmlEnCampoOperacion) {
+                resultado.add(operacion);
+                continue;
+            }
+
+            ObjectNode nodo =
+                    objectMapper.convertValue(
+                            operacion,
+                            ObjectNode.class
+                    );
+
+            nodo.put("tipo", "CREAR_RELACION");
+
+            if (operacion.tipoRelacion() == null
+                    || operacion.tipoRelacion().isBlank()) {
+                nodo.put(
+                        "tipoRelacion",
+                        normalizarTipoRelacion(tipoRecibido)
+                );
+            }
+
+            resultado.add(
+                    objectMapper.convertValue(
+                            nodo,
+                            OperacionIa.class
+                    )
+            );
+        }
+
+        return resultado;
+    }
+
+    /*
+     * Caso importante para el examen:
+     *
+     * 1) Ya existe Venta -- Producto como asociación normal.
+     * 2) Luego el usuario crea DetalleVenta y pide usarla como
+     *    clase de asociación de esa relación.
+     *
+     * Si la IA responde CREAR_RELACION con claseAsociacion,
+     * no debemos duplicar Venta--Producto. Convertimos la operación
+     * a ACTUALIZAR_RELACION sobre la relación base existente.
+     */
+    private List<OperacionIa> normalizarClaseAsociacionSobreRelacionExistente(
+            List<OperacionIa> operaciones,
+            ModeloCompletoResponse modeloActual
+    ) {
+        List<OperacionIa> resultado = new ArrayList<>();
+
+        for (OperacionIa operacion : operaciones) {
+            if (operacion == null
+                    || !esTipoOperacion(operacion, "CREAR_RELACION")
+                    || !tieneTexto(operacion.claseAsociacion())
+                    || !tieneTexto(operacion.claseOrigen())
+                    || !tieneTexto(operacion.claseDestino())) {
+
+                resultado.add(operacion);
+                continue;
+            }
+
+            RelacionDiagramaResponse relacionExistente =
+                    buscarRelacionUnicaEntreClases(
+                            modeloActual,
+                            operacion.claseOrigen(),
+                            operacion.claseDestino()
+                    );
+
+            if (relacionExistente == null) {
+                resultado.add(operacion);
+                continue;
+            }
+
+            ObjectNode nodo =
+                    objectMapper.convertValue(
+                            operacion,
+                            ObjectNode.class
+                    );
+
+            nodo.put("tipo", "ACTUALIZAR_RELACION");
+
+            String nombreSolicitado =
+                    operacion.nombreRelacion();
+
+            if (tieneTexto(relacionExistente.nombre())) {
+                nodo.put(
+                        "nombreRelacion",
+                        relacionExistente.nombre()
+                );
+
+                if (tieneTexto(nombreSolicitado)
+                        && !relacionExistente.nombre()
+                        .equalsIgnoreCase(nombreSolicitado.trim())) {
+                    nodo.put(
+                            "nuevoNombreRelacion",
+                            nombreSolicitado.trim()
+                    );
+                }
+            } else {
+                nodo.putNull("nombreRelacion");
+
+                if (tieneTexto(nombreSolicitado)) {
+                    nodo.put(
+                            "nuevoNombreRelacion",
+                            nombreSolicitado.trim()
+                    );
+                }
+            }
+
+            resultado.add(
+                    objectMapper.convertValue(
+                            nodo,
+                            OperacionIa.class
+                    )
+            );
+        }
+
+        return resultado;
+    }
+
+    private RelacionDiagramaResponse buscarRelacionUnicaEntreClases(
+            ModeloCompletoResponse modelo,
+            String nombreOrigen,
+            String nombreDestino
+    ) {
+        List<RelacionDiagramaResponse> candidatas =
+                buscarRelacionesEntreClases(
+                        modelo,
+                        nombreOrigen,
+                        nombreDestino
+                );
+
+        if (candidatas.size() == 1) {
+            return candidatas.get(0);
+        }
+
+        /*
+         * Si por una ejecución anterior quedó una relación con Association
+         * Class y otra relación base, para futuras conversiones preferimos
+         * la única relación base. Esto evita tratar el caso como ambiguo.
+         */
+        List<RelacionDiagramaResponse> relacionesBase =
+                candidatas.stream()
+                        .filter(relacion ->
+                                relacion.claseAsociacionId() == null
+                        )
+                        .toList();
+
+        return relacionesBase.size() == 1
+                ? relacionesBase.get(0)
+                : null;
+    }
+
+    private List<RelacionDiagramaResponse> buscarRelacionesEntreClases(
+            ModeloCompletoResponse modelo,
+            String nombreOrigen,
+            String nombreDestino
+    ) {
+        ClaseDiagramaResponse origen =
+                buscarClaseOpcional(
+                        modelo,
+                        nombreOrigen
+                );
+
+        ClaseDiagramaResponse destino =
+                buscarClaseOpcional(
+                        modelo,
+                        nombreDestino
+                );
+
+        if (origen == null || destino == null) {
+            return List.of();
+        }
+
+        return modelo.relaciones()
+                .stream()
+                .filter(relacion -> {
+                    boolean mismoSentido =
+                            relacion.claseOrigenId().equals(origen.id())
+                                    && relacion.claseDestinoId()
+                                    .equals(destino.id());
+
+                    boolean sentidoInverso =
+                            relacion.claseOrigenId().equals(destino.id())
+                                    && relacion.claseDestinoId()
+                                    .equals(origen.id());
+
+                    return mismoSentido || sentidoInverso;
+                })
+                .toList();
     }
 
     private List<OperacionIa> normalizarTiposAtributosImagen(
@@ -858,6 +1486,115 @@ public class ChatIaService {
         return valor != null && !valor.isBlank();
     }
 
+    private String aJsonSeguro(Object valor) {
+        try {
+            return objectMapper.writeValueAsString(valor);
+        } catch (Exception ex) {
+            return String.valueOf(valor);
+        }
+    }
+
+    private String resumirModelo(
+            ModeloCompletoResponse modelo
+    ) {
+        if (modelo == null) {
+            return "null";
+        }
+
+        StringBuilder resumen =
+                new StringBuilder();
+
+        resumen.append("version=")
+                .append(modelo.version())
+                .append(", clases=")
+                .append(modelo.clases() != null
+                        ? modelo.clases().size()
+                        : 0)
+                .append(", relaciones=")
+                .append(modelo.relaciones() != null
+                        ? modelo.relaciones().size()
+                        : 0);
+
+        if (modelo.relaciones() == null
+                || modelo.relaciones().isEmpty()) {
+            return resumen.toString();
+        }
+
+        resumen.append(" [");
+
+        for (int i = 0; i < modelo.relaciones().size(); i++) {
+            RelacionDiagramaResponse relacion =
+                    modelo.relaciones().get(i);
+
+            ClaseDiagramaResponse origen =
+                    modelo.clases()
+                            .stream()
+                            .filter(clase ->
+                                    clase.id().equals(
+                                            relacion.claseOrigenId()
+                                    )
+                            )
+                            .findFirst()
+                            .orElse(null);
+
+            ClaseDiagramaResponse destino =
+                    modelo.clases()
+                            .stream()
+                            .filter(clase ->
+                                    clase.id().equals(
+                                            relacion.claseDestinoId()
+                                    )
+                            )
+                            .findFirst()
+                            .orElse(null);
+
+            ClaseDiagramaResponse claseAsociacion =
+                    relacion.claseAsociacionId() == null
+                            ? null
+                            : modelo.clases()
+                            .stream()
+                            .filter(clase ->
+                                    clase.id().equals(
+                                            relacion.claseAsociacionId()
+                                    )
+                            )
+                            .findFirst()
+                            .orElse(null);
+
+            if (i > 0) {
+                resumen.append("; ");
+            }
+
+            resumen.append(
+                            origen != null
+                                    ? origen.nombre()
+                                    : relacion.claseOrigenId()
+                    )
+                    .append("->")
+                    .append(
+                            destino != null
+                                    ? destino.nombre()
+                                    : relacion.claseDestinoId()
+                    )
+                    .append(" tipo=")
+                    .append(relacion.tipo())
+                    .append(" mult=")
+                    .append(relacion.multiplicidadOrigen())
+                    .append("->")
+                    .append(relacion.multiplicidadDestino())
+                    .append(" assocClass=")
+                    .append(
+                            claseAsociacion != null
+                                    ? claseAsociacion.nombre()
+                                    : relacion.claseAsociacionId()
+                    );
+        }
+
+        resumen.append("]");
+
+        return resumen.toString();
+    }
+
     private ChatIaResponse ejecutarPlan(
             String codigoSesion,
             String clienteId,
@@ -866,14 +1603,67 @@ public class ChatIaService {
     ) {
         List<String> acciones = new ArrayList<>();
 
+        log.info(
+                "[IA-TRACE] EJECUTAR PLAN inicio. operaciones={}, modelo={}",
+                plan.operaciones() != null ? plan.operaciones().size() : 0,
+                resumirModelo(modeloActual)
+        );
+
         if (plan.operaciones() != null) {
-            for (OperacionIa operacion : plan.operaciones()) {
-                if (debeOmitirCreacionDuplicada(operacion, modeloActual)) {
+            int indice = 0;
+
+            for (OperacionIa operacionOriginal : plan.operaciones()) {
+                indice++;
+
+                log.info(
+                        "[IA-TRACE] OP {} ORIGINAL: {}",
+                        indice,
+                        aJsonSeguro(operacionOriginal)
+                );
+
+                OperacionIa operacion =
+                        normalizarOperacionContraModeloActual(
+                                operacionOriginal,
+                                modeloActual
+                        );
+
+                log.info(
+                        "[IA-TRACE] OP {} CONTRA MODELO ACTUAL: {}",
+                        indice,
+                        aJsonSeguro(operacion)
+                );
+
+                boolean omitirDuplicada =
+                        debeOmitirCreacionDuplicada(
+                                operacion,
+                                modeloActual
+                        );
+
+                boolean omitirAuxiliar =
+                        esCreacionAuxiliarDeClaseAsociacionExistente(
+                                operacion,
+                                modeloActual
+                        );
+
+                if (omitirDuplicada || omitirAuxiliar) {
+                    log.info(
+                            "[IA-TRACE] OP {} OMITIDA. duplicada={}, auxiliarAssociationClass={}, modelo={}",
+                            indice,
+                            omitirDuplicada,
+                            omitirAuxiliar,
+                            resumirModelo(modeloActual)
+                    );
                     continue;
                 }
 
                 OperacionColaborativaRequest solicitud =
                         convertirOperacion(operacion, clienteId, modeloActual);
+
+                log.info(
+                        "[IA-TRACE] OP {} SOLICITUD: {}",
+                        indice,
+                        aJsonSeguro(solicitud)
+                );
 
                 OperacionColaborativaResponse respuesta =
                         operacionColaborativaService.aplicarOperacion(
@@ -882,16 +1672,243 @@ public class ChatIaService {
                         );
 
                 modeloActual = respuesta.modelo();
+
+                log.info(
+                        "[IA-TRACE] OP {} APLICADA. MODELO DESPUES: {}",
+                        indice,
+                        resumirModelo(modeloActual)
+                );
+
                 acciones.add(describirOperacion(operacion));
                 publicarOperacion(codigoSesion, respuesta);
             }
         }
+
+        log.info(
+                "[IA-TRACE] EJECUTAR PLAN fin. acciones={}, modeloFinal={}",
+                acciones,
+                resumirModelo(modeloActual)
+        );
 
         return new ChatIaResponse(
                 plan.mensaje(),
                 List.copyOf(acciones),
                 modeloActual
         );
+    }
+
+    /*
+     * Última barrera defensiva antes de aplicar una operación.
+     *
+     * Si la IA pide CREAR_RELACION con claseAsociacion pero ya existe
+     * una relación base entre esas clases, la operación debe ser una
+     * actualización, no una nueva relación paralela.
+     *
+     * Se hace aquí (además de las normalizaciones previas) porque
+     * modeloActual cambia después de cada operación del mismo plan.
+     */
+    private OperacionIa normalizarOperacionContraModeloActual(
+            OperacionIa operacion,
+            ModeloCompletoResponse modeloActual
+    ) {
+        if (operacion == null
+                || !esTipoOperacion(operacion, "CREAR_RELACION")
+                || !tieneTexto(operacion.claseAsociacion())
+                || !tieneTexto(operacion.claseOrigen())
+                || !tieneTexto(operacion.claseDestino())) {
+            return operacion;
+        }
+
+        RelacionDiagramaResponse relacionExistente =
+                buscarRelacionPreferenteEntreClases(
+                        modeloActual,
+                        operacion.claseOrigen(),
+                        operacion.claseDestino(),
+                        operacion.claseAsociacion()
+                );
+
+        if (relacionExistente == null) {
+            return operacion;
+        }
+
+        ObjectNode nodo =
+                objectMapper.convertValue(
+                        operacion,
+                        ObjectNode.class
+                );
+
+        nodo.put("tipo", "ACTUALIZAR_RELACION");
+
+        /*
+         * Para identificar sin ambigüedad la relación actual, usamos su
+         * nombre real si lo tiene. Si no tiene nombre, dejamos null y la
+         * resolución posterior usará extremos + clase de asociación/base.
+         */
+        if (tieneTexto(relacionExistente.nombre())) {
+            nodo.put(
+                    "nombreRelacion",
+                    relacionExistente.nombre()
+            );
+
+            if (tieneTexto(operacion.nombreRelacion())
+                    && !relacionExistente.nombre()
+                    .equalsIgnoreCase(
+                            operacion.nombreRelacion().trim()
+                    )) {
+                nodo.put(
+                        "nuevoNombreRelacion",
+                        operacion.nombreRelacion().trim()
+                );
+            }
+        } else {
+            nodo.putNull("nombreRelacion");
+
+            if (tieneTexto(operacion.nombreRelacion())) {
+                nodo.put(
+                        "nuevoNombreRelacion",
+                        operacion.nombreRelacion().trim()
+                );
+            }
+        }
+
+        return objectMapper.convertValue(
+                nodo,
+                OperacionIa.class
+        );
+    }
+
+    /*
+     * Busca una relación entre dos clases. Si hay varias, para una
+     * Association Class prioriza:
+     *
+     * 1) la que ya usa esa misma clase de asociación (operación idempotente);
+     * 2) si no, la única relación base sin clase de asociación.
+     */
+    private RelacionDiagramaResponse buscarRelacionPreferenteEntreClases(
+            ModeloCompletoResponse modelo,
+            String nombreOrigen,
+            String nombreDestino,
+            String nombreClaseAsociacion
+    ) {
+        List<RelacionDiagramaResponse> candidatas =
+                buscarRelacionesEntreClases(
+                        modelo,
+                        nombreOrigen,
+                        nombreDestino
+                );
+
+        if (candidatas.isEmpty()) {
+            return null;
+        }
+
+        if (candidatas.size() == 1) {
+            return candidatas.get(0);
+        }
+
+        ClaseDiagramaResponse claseAsociacion =
+                buscarClaseOpcional(
+                        modelo,
+                        nombreClaseAsociacion
+                );
+
+        if (claseAsociacion != null) {
+            List<RelacionDiagramaResponse> conMismaClaseAsociacion =
+                    candidatas.stream()
+                            .filter(relacion ->
+                                    relacion.claseAsociacionId() != null
+                                            && relacion.claseAsociacionId()
+                                            .equals(claseAsociacion.id())
+                            )
+                            .toList();
+
+            if (conMismaClaseAsociacion.size() == 1) {
+                return conMismaClaseAsociacion.get(0);
+            }
+        }
+
+        List<RelacionDiagramaResponse> relacionesBase =
+                candidatas.stream()
+                        .filter(relacion ->
+                                relacion.claseAsociacionId() == null
+                        )
+                        .toList();
+
+        return relacionesBase.size() == 1
+                ? relacionesBase.get(0)
+                : null;
+    }
+
+    /*
+     * Idempotencia para comandos repetidos:
+     *
+     * Si C ya es clase de asociación de A--B, nunca permitimos que una
+     * respuesta posterior de la IA cree asociaciones normales A--C o B--C.
+     */
+    private boolean esCreacionAuxiliarDeClaseAsociacionExistente(
+            OperacionIa operacion,
+            ModeloCompletoResponse modelo
+    ) {
+        if (operacion == null
+                || !esTipoOperacion(operacion, "CREAR_RELACION")
+                || tieneTexto(operacion.claseAsociacion())
+                || !tieneTexto(operacion.claseOrigen())
+                || !tieneTexto(operacion.claseDestino())) {
+            return false;
+        }
+
+        ClaseDiagramaResponse origen =
+                buscarClaseOpcional(
+                        modelo,
+                        operacion.claseOrigen()
+                );
+
+        ClaseDiagramaResponse destino =
+                buscarClaseOpcional(
+                        modelo,
+                        operacion.claseDestino()
+                );
+
+        if (origen == null || destino == null) {
+            return false;
+        }
+
+        for (RelacionDiagramaResponse relacion : modelo.relaciones()) {
+            if (relacion.claseAsociacionId() == null) {
+                continue;
+            }
+
+            UUID claseAsociacionId =
+                    relacion.claseAsociacionId();
+
+            boolean origenEsClaseAsociacion =
+                    origen.id().equals(claseAsociacionId);
+
+            boolean destinoEsClaseAsociacion =
+                    destino.id().equals(claseAsociacionId);
+
+            if (!origenEsClaseAsociacion
+                    && !destinoEsClaseAsociacion) {
+                continue;
+            }
+
+            UUID otroExtremo =
+                    origenEsClaseAsociacion
+                            ? destino.id()
+                            : origen.id();
+
+            boolean perteneceALaRelacionPrincipal =
+                    otroExtremo.equals(
+                            relacion.claseOrigenId()
+                    ) || otroExtremo.equals(
+                            relacion.claseDestinoId()
+                    );
+
+            if (perteneceALaRelacionPrincipal) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private boolean debeOmitirCreacionDuplicada(
@@ -1353,6 +2370,42 @@ public class ChatIaService {
             );
         }
 
+        if (candidatas.size() > 1
+                && tieneTexto(operacion.claseAsociacion())) {
+
+            ClaseDiagramaResponse claseAsociacion =
+                    buscarClaseOpcional(
+                            modelo,
+                            operacion.claseAsociacion()
+                    );
+
+            if (claseAsociacion != null) {
+                List<RelacionDiagramaResponse> mismaClaseAsociacion =
+                        candidatas.stream()
+                                .filter(relacion ->
+                                        relacion.claseAsociacionId() != null
+                                                && relacion.claseAsociacionId()
+                                                .equals(claseAsociacion.id())
+                                )
+                                .toList();
+
+                if (mismaClaseAsociacion.size() == 1) {
+                    return mismaClaseAsociacion.get(0);
+                }
+            }
+
+            List<RelacionDiagramaResponse> relacionesBase =
+                    candidatas.stream()
+                            .filter(relacion ->
+                                    relacion.claseAsociacionId() == null
+                            )
+                            .toList();
+
+            if (relacionesBase.size() == 1) {
+                return relacionesBase.get(0);
+            }
+        }
+
         if (candidatas.size() > 1) {
             throw new IllegalArgumentException(
                     "La relación indicada es ambigua; especifica su nombre y clases"
@@ -1392,15 +2445,27 @@ public class ChatIaService {
             return false;
         }
 
-        boolean coincideOrigen = origen == null
-                || origen.isBlank()
-                || claseOrigen.nombre().equalsIgnoreCase(origen.trim());
+        boolean mismoSentido =
+                (origen == null
+                        || origen.isBlank()
+                        || claseOrigen.nombre()
+                        .equalsIgnoreCase(origen.trim()))
+                        && (destino == null
+                        || destino.isBlank()
+                        || claseDestino.nombre()
+                        .equalsIgnoreCase(destino.trim()));
 
-        boolean coincideDestino = destino == null
-                || destino.isBlank()
-                || claseDestino.nombre().equalsIgnoreCase(destino.trim());
+        boolean sentidoInverso =
+                (origen == null
+                        || origen.isBlank()
+                        || claseDestino.nombre()
+                        .equalsIgnoreCase(origen.trim()))
+                        && (destino == null
+                        || destino.isBlank()
+                        || claseOrigen.nombre()
+                        .equalsIgnoreCase(destino.trim()));
 
-        return coincideOrigen && coincideDestino;
+        return mismoSentido || sentidoInverso;
     }
 
     private ClaseDiagramaResponse buscarClasePorId(

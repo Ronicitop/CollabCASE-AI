@@ -20,7 +20,8 @@ public interface RelacionDiagramaRepository extends JpaRepository<RelacionDiagra
                set r.tipo = :tipo,
                    r.multiplicidadOrigen = :multiplicidadOrigen,
                    r.multiplicidadDestino = :multiplicidadDestino,
-                   r.nombre = :nombre
+                   r.nombre = :nombre,
+                   r.claseAsociacion = :claseAsociacion
              where r.id = :relacionId
                and r.modelo.id = :modeloId
             """)
