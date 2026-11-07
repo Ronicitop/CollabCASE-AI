@@ -1,3 +1,4 @@
+import { SalaDebatePanel } from './SalaDebatePanel'
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import {
@@ -113,13 +114,13 @@ type SolicitudModeloCompleto = {
   relaciones: RelacionSolicitudModelo[]
 }
 
-
 type SesionColaborativa = {
   id: string
   codigo: string
   proyectoId: string
   activa: boolean
   creadaEn: string
+  nombreUsuario?: string
 }
 
 type EstadoConexion = 'desconectado' | 'conectando' | 'conectado'
@@ -136,7 +137,7 @@ const ordenarAtributosParaMostrar = (
   })
 }
 
-type OperacionColaborativaResponse = {
+export type OperacionColaborativaResponse = {
   operacionId: string
   clienteId: string
   tipo: string
@@ -226,7 +227,7 @@ const normalizarTipoRelacionVisual = (tipo?: string): string => {
     .trim()
     .toUpperCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\\u0300-\\u036f]/g, '')
 
   const equivalencias: Record<string, string> = {
     ASSOCIATION: 'ASOCIACION',
@@ -259,9 +260,6 @@ function RelacionUmlEdge({
   style,
   data,
 }: EdgeProps) {
-  // Enlace flotante estilo Enterprise Architect:
-  // el extremo de la relación se calcula contra TODO el perímetro de la clase,
-  // no contra un único punto central fijo.
   const nodoOrigen = useInternalNode(source)
   const nodoDestino = useInternalNode(target)
 
@@ -373,9 +371,6 @@ function RelacionUmlEdge({
     }
   }
 
-  // Las decoraciones UML se orientan según el segmento ortogonal real que
-  // sale/entra de la clase. Así los triángulos, diamantes y flechas no quedan
-  // inclinados aunque el resto de la relación tenga varios giros de 90°.
   const salidaOrigen = vectorExterior(sourcePosition)
   const exteriorDestino = vectorExterior(targetPosition)
   const entradaDestino = {
@@ -392,8 +387,6 @@ function RelacionUmlEdge({
     y: entradaDestino.x,
   }
 
-  // IMPORTANTE:
-  // Esta lógica de Association Class se mantiene igual a la versión estable.
   const rutaClaseAsociacion =
     datos?.claseAsociacionX !== undefined &&
     datos?.claseAsociacionY !== undefined
@@ -407,7 +400,6 @@ function RelacionUmlEdge({
     ...(esDiscontinua ? { strokeDasharray: '8 6' } : {}),
   }
 
-  // Triángulo UML en el destino: generalización/herencia y realización.
   const puntaTriangulo = { x: targetX, y: targetY }
   const centroBaseTriangulo = {
     x: targetX - entradaDestino.x * 18,
@@ -422,7 +414,6 @@ function RelacionUmlEdge({
     y: centroBaseTriangulo.y - perpendicularDestino.y * 10,
   }
 
-  // Diamante UML en el origen: agregación/composición.
   const diamanteA = { x: sourceX, y: sourceY }
   const diamanteB = {
     x: sourceX + salidaOrigen.x * 10 + perpendicularOrigen.x * 7,
@@ -437,7 +428,6 @@ function RelacionUmlEdge({
     y: sourceY + salidaOrigen.y * 10 - perpendicularOrigen.y * 7,
   }
 
-  // Flecha abierta UML en el destino: dependencia.
   const flechaAbiertaA = {
     x: targetX - entradaDestino.x * 14 + perpendicularDestino.x * 7,
     y: targetY - entradaDestino.y * 14 + perpendicularDestino.y * 7,
@@ -447,8 +437,6 @@ function RelacionUmlEdge({
     y: targetY - entradaDestino.y * 14 - perpendicularDestino.y * 7,
   }
 
-  // Cardinalidades: se colocan junto al punto REAL del perímetro donde termina
-  // cada relación, no alrededor del centro fijo de la clase.
   const distanciaDesdeClase = 22
   const separacionDeLinea = 12
   const perpendicularEtiquetaDestino = {
@@ -686,6 +674,9 @@ function App() {
   const [estadoConexion, setEstadoConexion] =
     useState<EstadoConexion>('desconectado')
   const [codigoSesion, setCodigoSesion] = useState('')
+  const [miNombreUsuario, setMiNombreUsuario] = useState(() => {
+    return localStorage.getItem('collabcase_usuario_nombre') || 'Ingeniero'
+  })
   const [procesandoSesion, setProcesandoSesion] = useState(false)
   const [errorColaboracion, setErrorColaboracion] = useState('')
 
@@ -842,7 +833,6 @@ function App() {
     )
   }, [modeloAbierto])
 
-
   useEffect(() => {
     return () => {
       if (clienteStompRef.current) {
@@ -922,66 +912,66 @@ function App() {
   }
 
   const eliminarProyecto = async (proyecto: Proyecto) => {
-  if (!online) {
-    setErrorEliminacionProyecto(
-      'Eliminar proyectos requiere conexión con el servidor.',
-    )
-    return
-  }
-
-  const confirmar = window.confirm(
-    `¿Eliminar definitivamente el proyecto "${proyecto.nombre}"?\n\n` +
-      'Se eliminarán también su modelo UML, clases, atributos, relaciones y sesiones colaborativas asociadas.\n\n' +
-      'Esta acción no se puede deshacer.',
-  )
-
-  if (!confirmar) {
-    return
-  }
-
-  try {
-    setEliminandoProyectoId(proyecto.id)
-    setErrorEliminacionProyecto('')
-
-    const respuesta = await fetch(
-      `${API_URL}/api/proyectos/${proyecto.id}`,
-      {
-        method: 'DELETE',
-      },
-    )
-
-    if (!respuesta.ok) {
-      throw new Error(
-        await obtenerMensajeErrorHttp(
-          respuesta,
-          'No se pudo eliminar el proyecto.',
-        ),
+    if (!online) {
+      setErrorEliminacionProyecto(
+        'Eliminar proyectos requiere conexión con el servidor.',
       )
+      return
     }
 
-    await Promise.all([
-      eliminarProyectoOffline(proyecto.id),
-      eliminarModeloOffline(proyecto.id),
-      limpiarOperacionesProyecto(proyecto.id),
-    ])
-
-    setProyectos((actuales) =>
-      actuales.filter(
-        (proyectoActual) => proyectoActual.id !== proyecto.id,
-      ),
+    const confirmar = window.confirm(
+      `¿Eliminar definitivamente el proyecto "${proyecto.nombre}"?\n\n` +
+        'Se eliminarán también su modelo UML, clases, atributos, relaciones y sesiones colaborativas asociadas.\n\n' +
+        'Esta acción no se puede deshacer.',
     )
 
-    setErrorEliminacionProyecto('')
-  } catch (error) {
-    setErrorEliminacionProyecto(
-      error instanceof Error
-        ? error.message
-        : 'Ocurrió un error al eliminar el proyecto.',
-    )
-  } finally {
-    setEliminandoProyectoId(null)
+    if (!confirmar) {
+      return
+    }
+
+    try {
+      setEliminandoProyectoId(proyecto.id)
+      setErrorEliminacionProyecto('')
+
+      const respuesta = await fetch(
+        `${API_URL}/api/proyectos/${proyecto.id}`,
+        {
+          method: 'DELETE',
+        },
+      )
+
+      if (!respuesta.ok) {
+        throw new Error(
+          await obtenerMensajeErrorHttp(
+            respuesta,
+            'No se pudo eliminar el proyecto.',
+          ),
+        )
+      }
+
+      await Promise.all([
+        eliminarProyectoOffline(proyecto.id),
+        eliminarModeloOffline(proyecto.id),
+        limpiarOperacionesProyecto(proyecto.id),
+      ])
+
+      setProyectos((actuales) =>
+        actuales.filter(
+          (proyectoActual) => proyectoActual.id !== proyecto.id,
+        ),
+      )
+
+      setErrorEliminacionProyecto('')
+    } catch (error) {
+      setErrorEliminacionProyecto(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al eliminar el proyecto.',
+      )
+    } finally {
+      setEliminandoProyectoId(null)
+    }
   }
-}
 
   const obtenerModeloCompleto = async (
     proyectoId: string,
@@ -1057,19 +1047,18 @@ function App() {
         `/topic/sesiones/${sesion.codigo}/operaciones`,
         (mensaje) => {
           try {
-            const respuestaOperacion: OperacionColaborativaResponse =
-              JSON.parse(mensaje.body)
+            const respuestaOperacion = JSON.parse(mensaje.body)
 
             if (
+              respuestaOperacion?.modelo &&
               respuestaOperacion.modelo.proyectoId === sesion.proyectoId
             ) {
               setModeloAbierto(respuestaOperacion.modelo)
               setErrorGuardado('')
+              setErrorColaboracion('')
             }
-          } catch {
-            setErrorColaboracion(
-              'Se recibió una operación colaborativa inválida.',
-            )
+          } catch (e) {
+            console.warn('Aviso de payload compuesto recibido:', e)
           }
         },
       )
@@ -1664,8 +1653,6 @@ function App() {
         },
       )
     } catch {
-      // navigator.onLine puede seguir indicando conexión aunque el backend
-      // no sea alcanzable. En ese caso preservamos el trabajo localmente.
       return guardarCambioLocal(solicitud)
     }
 
@@ -2175,7 +2162,6 @@ function App() {
         setModeloAbierto(modeloActualizado)
       }
     } catch (error) {
-      // Volvemos a las posiciones confirmadas por el modelo canónico.
       setNodos(construirNodos(modeloAbierto))
 
       if (error instanceof Error) {
@@ -4367,6 +4353,15 @@ function App() {
               </ReactFlow>
             )}
           </section>
+
+          {sesionColaborativa && (
+            <SalaDebatePanel
+              sesionId={sesionColaborativa.id}
+              usuarioNombre={miNombreUsuario.trim() || 'Ingeniero'}
+              stompClient={clienteStompRef.current}
+              backendUrl={API_URL}
+            />
+          )}
         </main>
       </div>
     )
@@ -4431,10 +4426,22 @@ function App() {
         >
           <div>
             <h3>Unirse a una sesión colaborativa</h3>
-            <p>Ingresa el código compartido por el responsable de la sesión.</p>
+            <p>Ingresa tu nombre y el código compartido por el responsable.</p>
           </div>
 
-          <div className="fila-unirse-sesion">
+          <div className="fila-unirse-sesion" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              value={miNombreUsuario}
+              onChange={(e) => {
+                setMiNombreUsuario(e.target.value)
+                localStorage.setItem('collabcase_usuario_nombre', e.target.value)
+              }}
+              placeholder="Tu nombre (ej: Carlos o Ronald)"
+              style={{ flex: 1, minWidth: 160 }}
+              required
+            />
+
             <input
               type="text"
               value={codigoSesion}
@@ -4442,7 +4449,9 @@ function App() {
                 setCodigoSesion(evento.target.value.toUpperCase())
               }
               maxLength={8}
-              placeholder="Ej: 6AA03CE2"
+              placeholder="Código (ej: 0F26DEA6)"
+              style={{ flex: 1, minWidth: 140 }}
+              required
             />
 
             <button
@@ -4594,8 +4603,8 @@ function App() {
                       fontWeight: 700,
                       cursor:
                         !online ||
-                          eliminandoProyectoId !== null ||
-                          abriendoId !== null
+                        eliminandoProyectoId !== null ||
+                        abriendoId !== null
                           ? 'not-allowed'
                           : 'pointer',
                     }}
