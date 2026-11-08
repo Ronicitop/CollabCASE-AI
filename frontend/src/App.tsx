@@ -1,3 +1,4 @@
+import { generarUuid } from './uuid'
 import { SalaDebatePanel } from './SalaDebatePanel'
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
@@ -668,7 +669,7 @@ function App() {
   const [sincronizandoOffline, setSincronizandoOffline] = useState(false)
 
   const clienteStompRef = useRef<Client | null>(null)
-  const clienteIdRef = useRef(`cliente-${crypto.randomUUID()}`)
+  const clienteIdRef = useRef(`cliente-${generarUuid()}`)
   const [sesionColaborativa, setSesionColaborativa] =
     useState<SesionColaborativa | null>(null)
   const [estadoConexion, setEstadoConexion] =
@@ -1365,7 +1366,7 @@ function App() {
       'Interpreta esta imagen como un diagrama UML de clases y aplica al modelo los cambios claramente identificables. No inventes elementos que no se vean con suficiente claridad.'
 
     const mensajeUsuario: MensajeChatIa = {
-      id: crypto.randomUUID(),
+      id: generarUuid(),
       autor: 'usuario',
       texto: mensajeIa.trim()
         ? `📷 Imagen: ${archivo.name}\n${mensajeIa.trim()}`
@@ -1418,7 +1419,7 @@ function App() {
       setHistorialIa((actual) => [
         ...actual,
         {
-          id: crypto.randomUUID(),
+          id: generarUuid(),
           autor: 'ia',
           texto: resultado.mensaje,
           acciones: resultado.accionesEjecutadas,
@@ -1460,7 +1461,7 @@ function App() {
     }
 
     const mensajeUsuario: MensajeChatIa = {
-      id: crypto.randomUUID(),
+      id: generarUuid(),
       autor: 'usuario',
       texto: mensajeLimpio,
     }
@@ -1511,7 +1512,7 @@ function App() {
       setHistorialIa((actual) => [
         ...actual,
         {
-          id: crypto.randomUUID(),
+          id: generarUuid(),
           autor: 'ia',
           texto: resultado.mensaje,
           acciones: resultado.accionesEjecutadas,
@@ -1540,7 +1541,7 @@ function App() {
     const clavesAIds = new Map<string, string>()
 
     const clases: ClaseDiagrama[] = solicitud.clases.map((clase) => {
-      const claseId = clase.id ?? `local-clase-${crypto.randomUUID()}`
+      const claseId = clase.id ?? `local-clase-${generarUuid()}`
 
       clavesAIds.set(clase.claveCliente, claseId)
       clavesAIds.set(claseId, claseId)
@@ -1551,7 +1552,7 @@ function App() {
         posicionX: clase.posicionX,
         posicionY: clase.posicionY,
         atributos: clase.atributos.map((atributo) => ({
-          id: atributo.id ?? `local-atributo-${crypto.randomUUID()}`,
+          id: atributo.id ?? `local-atributo-${generarUuid()}`,
           nombre: atributo.nombre,
           tipoDato: atributo.tipoDato,
           permiteNulo: atributo.permiteNulo,
@@ -1561,7 +1562,7 @@ function App() {
     })
 
     const relaciones: RelacionDiagrama[] = solicitud.relaciones.map((relacion) => ({
-      id: relacion.id ?? `local-relacion-${crypto.randomUUID()}`,
+      id: relacion.id ?? `local-relacion-${generarUuid()}`,
       claseOrigenId:
         clavesAIds.get(relacion.claseOrigenClave) ?? relacion.claseOrigenClave,
       claseDestinoId:
@@ -2098,7 +2099,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo: 'MOVER_CLASE',
             datos: {
@@ -2216,7 +2217,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo: 'RENOMBRAR_CLASE',
             datos: {
@@ -2248,7 +2249,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo: 'CREAR_CLASE',
             datos: {
@@ -2273,7 +2274,7 @@ function App() {
       const columna = cantidadClases % 3
       const fila = Math.floor(cantidadClases / 3)
 
-      const claveNuevaClase = `nueva-${crypto.randomUUID()}`
+      const claveNuevaClase = `nueva-${generarUuid()}`
 
       const clasesExistentes = modeloAbierto.clases.map((clase) => {
         const posicion = posicionesPorId.get(clase.id) ?? {
@@ -2395,7 +2396,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo: 'ELIMINAR_CLASE',
             datos: {
@@ -2572,7 +2573,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo:
               atributoEditandoId === null
@@ -2742,7 +2743,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo: 'ELIMINAR_ATRIBUTO',
             datos: {
@@ -2890,7 +2891,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo:
               relacionEditandoId === null
@@ -3091,7 +3092,7 @@ function App() {
         cliente.publish({
           destination: `/app/sesiones/${sesionColaborativa.codigo}/operaciones`,
           body: JSON.stringify({
-            operacionId: crypto.randomUUID(),
+            operacionId: generarUuid(),
             clienteId: clienteIdRef.current,
             tipo: 'ELIMINAR_RELACION',
             datos: {
@@ -4356,6 +4357,9 @@ function App() {
 
           {sesionColaborativa && (
             <SalaDebatePanel
+              key={`${API_URL}:${sesionColaborativa.proyectoId}`}
+              proyectoId={sesionColaborativa.proyectoId}
+              conectado={estadoConexion === 'conectado'}
               sesionId={sesionColaborativa.id}
               usuarioNombre={miNombreUsuario.trim() || 'Ingeniero'}
               stompClient={clienteStompRef.current}

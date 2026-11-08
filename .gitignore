@@ -27,3 +27,12 @@ Thumbs.db
 *.env.*
 !**/.env.example
 !**/*.env.example
+
+# Firebase: archivos de configuración y credenciales locales
+**/google-services.json
+**/firebase-admin*.json
+**/firebase-service-account*.json
+**/firebase_options.dart
+.secrets/
+# Override local: monta las credenciales privadas para las pruebas con Docker.
+docker-compose.override.yml

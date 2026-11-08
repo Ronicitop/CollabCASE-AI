@@ -13,13 +13,17 @@ import com.collabcase.modelado.repositorio.RelacionDiagramaRepository;
 import com.collabcase.proyecto.dominio.Proyecto;
 import com.collabcase.proyecto.repositorio.ProyectoRepository;
 import org.springframework.stereotype.Service;
+import com.collabcase.notificacion.NotificacionesService;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
 
 @Service
+@Transactional
 public class ProyectoService {
+
+    private final NotificacionesService notificaciones;
 
     private final ProyectoRepository proyectoRepository;
     private final SesionColaborativaRepository sesionColaborativaRepository;
@@ -29,6 +33,7 @@ public class ProyectoService {
     private final RelacionDiagramaRepository relacionDiagramaRepository;
 
     public ProyectoService(
+            NotificacionesService notificaciones,
             ProyectoRepository proyectoRepository,
             SesionColaborativaRepository sesionColaborativaRepository,
             ModeloDiagramaRepository modeloDiagramaRepository,
@@ -36,6 +41,7 @@ public class ProyectoService {
             AtributoDiagramaRepository atributoDiagramaRepository,
             RelacionDiagramaRepository relacionDiagramaRepository) {
 
+        this.notificaciones = notificaciones;
         this.proyectoRepository = proyectoRepository;
         this.sesionColaborativaRepository = sesionColaborativaRepository;
         this.modeloDiagramaRepository = modeloDiagramaRepository;
@@ -45,7 +51,9 @@ public class ProyectoService {
     }
 
     public Proyecto crear(Proyecto proyecto) {
-        return proyectoRepository.save(proyecto);
+        var guardado = proyectoRepository.save(proyecto);
+        notificaciones.proyecto(guardado.getId());
+        return guardado;
     }
 
     public List<Proyecto> listarTodos() {
@@ -68,7 +76,9 @@ public class ProyectoService {
         proyecto.setNombre(datosProyecto.getNombre());
         proyecto.setDescripcion(datosProyecto.getDescripcion());
 
-        return proyectoRepository.save(proyecto);
+        var guardado = proyectoRepository.save(proyecto);
+        notificaciones.proyecto(guardado.getId());
+        return guardado;
     }
 
     @Transactional
@@ -88,6 +98,7 @@ public class ProyectoService {
 
         // 3. Finalmente eliminar el proyecto.
         proyectoRepository.delete(proyecto);
+        notificaciones.proyecto(id);
     }
 
     private void eliminarModeloCompleto(ModeloDiagrama modelo) {

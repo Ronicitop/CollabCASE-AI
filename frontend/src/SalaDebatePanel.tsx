@@ -1,107 +1,82 @@
-import React, { useState, useEffect, useRef } from 'react';
-
-interface MensajeDTO {
-  id?: string;
-  sesionId: string;
-  remitenteNombre: string;
-  tipoEmisor: 'USUARIO' | 'IA' | 'SISTEMA';
-  contenido: string;
-  fechaHora?: string;
-}
+import { API_URL } from './config';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type { Client, StompSubscription } from '@stomp/stompjs';
+import { combinarMensajes, confirmarMensaje } from './chatMessages';
+import type { MensajeDTO } from './chatMessages';
 
 interface SalaDebatePanelProps {
   sesionId: string;
+  proyectoId: string;
+  conectado: boolean;
   usuarioNombre: string;
-  stompClient?: any;
+  stompClient?: Client | null;
   backendUrl?: string;
 }
 
 export const SalaDebatePanel: React.FC<SalaDebatePanelProps> = ({
   sesionId,
+  proyectoId,
+  conectado,
   usuarioNombre,
   stompClient,
-  backendUrl = import.meta.env.VITE_API_URL || 
-    (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-      ? 'http://localhost:8080'
-      : 'https://collabcase-ai-backend-2026.azurewebsites.net')
+  backendUrl = API_URL
 }) => {
   const [mensajes, setMensajes] = useState<MensajeDTO[]>([]);
   const [nuevoMensaje, setNuevoMensaje] = useState('');
   const [cargando, setCargando] = useState(false);
   const [minimizado, setMinimizado] = useState(false);
+  const [errorHistorial, setErrorHistorial] = useState('');
   const finMensajesRef = useRef<HTMLDivElement>(null);
+  const contadorTemporal = useRef(0);
 
-  // 1. Cargar y sincronizar mensajes REST
-  const refrescarMensajes = async () => {
-    if (!sesionId) return;
+  const refrescarMensajes = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await fetch(`${backendUrl}/api/sala/${sesionId}/mensajes`);
-      if (res.ok) {
-        const data: MensajeDTO[] = await res.json();
-        if (Array.isArray(data)) {
-          setMensajes(data);
-          if (data.length > 0 && (data[data.length - 1].tipoEmisor === 'IA' || data[data.length - 1].remitenteNombre.includes('CollabCASE AI'))) {
-            setCargando(false);
-          }
-        }
-      }
+      const res = await fetch(`${backendUrl}/api/sala/proyecto/${proyectoId}/mensajes`, { signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: MensajeDTO[] = await res.json();
+      if (!Array.isArray(data) || signal.aborted) return;
+      setMensajes(prev => combinarMensajes(prev, data));
+      setErrorHistorial('');
+      if (data.at(-1)?.tipoEmisor === 'IA') setCargando(false);
     } catch (err) {
-      console.warn('Aviso sincronizando historial de sala:', err);
+      if (signal.aborted) return;
+      setErrorHistorial('No se pudo actualizar el historial. Se reintentará al reconectar.');
+      console.warn('Aviso sincronizando historial del proyecto:', err);
     }
-  };
+  }, [backendUrl, proyectoId]);
 
+  // Suscribirse antes de consultar el historial evita perder mensajes durante la carga.
+  // conectado cambia también al reconectar el mismo cliente STOMP.
   useEffect(() => {
-    refrescarMensajes();
-  }, [sesionId, backendUrl]);
-
-  // Sondeo de respaldo mientras esté cargando
-  useEffect(() => {
-    if (!cargando || !sesionId) return;
-
-    const timer = setInterval(() => {
-      refrescarMensajes();
-    }, 2500);
-
-    const timeout = setTimeout(() => {
-      setCargando(false);
-    }, 12000);
-
-    return () => {
-      clearInterval(timer);
-      clearTimeout(timeout);
-    };
-  }, [cargando, sesionId]);
-
-  // 2. Suscripción WebSocket STOMP
-  useEffect(() => {
-    if (!stompClient || !sesionId) return;
-
-    const topic = `/topic/sesion/${sesionId}/mensajes`;
-    let sub: any = null;
-
-    try {
-      if (stompClient.connected && typeof stompClient.subscribe === 'function') {
-        sub = stompClient.subscribe(topic, (payload: any) => {
+    const abort = new AbortController();
+    let subscription: StompSubscription | undefined;
+    if (conectado && stompClient?.connected) {
+      subscription = stompClient.subscribe(`/topic/proyecto/${proyectoId}/mensajes`, payload => {
+        if (abort.signal.aborted) return;
+        try {
           const msg: MensajeDTO = JSON.parse(payload.body);
-          setMensajes((prev) => {
-            if (msg.id && prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg];
-          });
-          if (msg.tipoEmisor === 'IA' || msg.remitenteNombre.includes('CollabCASE AI')) {
-            setCargando(false);
-          }
-        });
-      }
-    } catch (e) {
-      console.warn('Esperando conexión STOMP...', e);
+          setMensajes(prev => combinarMensajes(prev, [msg]));
+          if (msg.tipoEmisor === 'IA') setCargando(false);
+        } catch (error) { console.warn('Mensaje de chat inválido:', error); }
+      });
     }
-
+    queueMicrotask(() => {
+      if (!abort.signal.aborted) void refrescarMensajes(abort.signal);
+    });
     return () => {
-      if (sub && typeof sub.unsubscribe === 'function') {
-        sub.unsubscribe();
-      }
+      abort.abort();
+      if (stompClient?.connected) subscription?.unsubscribe();
     };
-  }, [stompClient, sesionId]);
+  }, [stompClient, conectado, proyectoId, refrescarMensajes]);
+
+  // Respaldo REST si falta WebSocket o mientras se espera una respuesta de IA.
+  useEffect(() => {
+    if (conectado && !cargando) return;
+    const abort = new AbortController();
+    const timer = setInterval(() => { void refrescarMensajes(abort.signal); }, cargando ? 2500 : 5000);
+    const timeout = cargando ? setTimeout(() => setCargando(false), 12000) : undefined;
+    return () => { abort.abort(); clearInterval(timer); clearTimeout(timeout); };
+  }, [conectado, cargando, refrescarMensajes]);
 
   useEffect(() => {
     if (!minimizado) {
@@ -127,7 +102,8 @@ export const SalaDebatePanel: React.FC<SalaDebatePanelProps> = ({
       contenido: texto,
     };
 
-    setMensajes((prev) => [...prev, { ...payload, id: `temp-${Date.now()}` }]);
+    const temporalId = `temp-${Date.now()}-${++contadorTemporal.current}`;
+    setMensajes((prev) => combinarMensajes(prev, [{ ...payload, id: temporalId }]));
     setNuevoMensaje('');
 
     try {
@@ -140,10 +116,11 @@ export const SalaDebatePanel: React.FC<SalaDebatePanelProps> = ({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const guardado = await res.json();
-      setMensajes((prev) =>
-        prev.map((m) => (m.id?.startsWith('temp-') && m.contenido === texto ? guardado : m))
-      );
+      setMensajes((prev) => confirmarMensaje(prev, temporalId, guardado));
     } catch (err) {
+      setMensajes(prev => prev.filter(m => m.id !== temporalId));
+      setErrorHistorial('No se pudo enviar el mensaje. Puedes volver a intentarlo.');
+      setNuevoMensaje(texto);
       console.error('Error enviando mensaje:', err);
       setCargando(false);
     }
@@ -166,7 +143,7 @@ export const SalaDebatePanel: React.FC<SalaDebatePanelProps> = ({
     <aside style={styles.container}>
       <header style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <h3 style={styles.title}>💬 Sala de Debate & IA Par</h3>
+          <h3 style={styles.title}>💬 Chat del proyecto & IA Par</h3>
           <span style={styles.badge}>Sesión Activa</span>
         </div>
         <button
@@ -185,9 +162,10 @@ export const SalaDebatePanel: React.FC<SalaDebatePanelProps> = ({
         </span>
       </div>
 
+      {errorHistorial && <p role="alert" style={{ padding: 8, margin: 0 }}>{errorHistorial}</p>}
       <div style={styles.messagesContainer}>
         {mensajes.length === 0 ? (
-          <p style={styles.emptyState}>No hay mensajes en la sala. Escribe algo o usa @ia para consultar.</p>
+          <p style={styles.emptyState}>Todavía no hay mensajes en este proyecto. Escribe algo o usa @ia para consultar.</p>
         ) : (
           mensajes.map((m, idx) => {
             const esIa = m.tipoEmisor === 'IA' || m.remitenteNombre.includes('CollabCASE AI');

@@ -19,6 +19,7 @@ import com.collabcase.modelado.repositorio.RelacionDiagramaRepository;
 import com.collabcase.proyecto.dominio.Proyecto;
 import com.collabcase.proyecto.repositorio.ProyectoRepository;
 import org.springframework.stereotype.Service;
+import com.collabcase.notificacion.NotificacionesService;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
@@ -31,6 +32,8 @@ import java.util.UUID;
 @Service
 public class ModeloDiagramaService {
 
+    private final NotificacionesService notificaciones;
+
     private final ModeloDiagramaRepository modeloDiagramaRepository;
     private final ProyectoRepository proyectoRepository;
     private final ClaseDiagramaRepository claseDiagramaRepository;
@@ -38,12 +41,14 @@ public class ModeloDiagramaService {
     private final RelacionDiagramaRepository relacionDiagramaRepository;
 
     public ModeloDiagramaService(
+            NotificacionesService notificaciones,
             ModeloDiagramaRepository modeloDiagramaRepository,
             ProyectoRepository proyectoRepository,
             ClaseDiagramaRepository claseDiagramaRepository,
             AtributoDiagramaRepository atributoDiagramaRepository,
             RelacionDiagramaRepository relacionDiagramaRepository) {
 
+        this.notificaciones = notificaciones;
         this.modeloDiagramaRepository = modeloDiagramaRepository;
         this.proyectoRepository = proyectoRepository;
         this.claseDiagramaRepository = claseDiagramaRepository;
@@ -71,7 +76,9 @@ public class ModeloDiagramaService {
                 .version(1L)
                 .build();
 
-        return modeloDiagramaRepository.save(modelo);
+        var guardado = modeloDiagramaRepository.save(modelo);
+        notificaciones.modelo(proyectoId);
+        return guardado;
     }
 
     public ModeloDiagrama buscarPorId(UUID id) {
@@ -170,6 +177,8 @@ public class ModeloDiagramaService {
 
         ModeloDiagrama modelo = buscarPorProyecto(proyectoId);
 
+        var contenidoAnterior = com.collabcase.notificacion.ContenidoModelo.de(obtenerModeloCompleto(proyectoId));
+
         Map<String, ClaseDiagrama> clasesPorClave = new HashMap<>();
         Set<UUID> clasesConservadas = new HashSet<>();
 
@@ -245,7 +254,11 @@ public class ModeloDiagramaService {
 
         modeloDiagramaRepository.saveAndFlush(modelo);
 
-        return obtenerModeloCompleto(proyectoId);
+        var respuesta = obtenerModeloCompleto(proyectoId);
+        if (!contenidoAnterior.equals(com.collabcase.notificacion.ContenidoModelo.de(respuesta))) {
+            notificaciones.modelo(proyectoId);
+        }
+        return respuesta;
     }
 
     private void sincronizarAtributos(

@@ -18,6 +18,16 @@ public class SesionColaborativaService {
     private final SesionColaborativaRepository sesionColaborativaRepository;
     private final ProyectoRepository proyectoRepository;
 
+    @Transactional(readOnly = true)
+    public java.util.List<SesionColaborativaResponse> listarPorProyecto(UUID proyectoId) {
+        if (!proyectoRepository.existsById(proyectoId)) {
+            throw new IllegalArgumentException("Proyecto no encontrado");
+        }
+        return sesionColaborativaRepository.findByProyectoId(proyectoId).stream()
+                .sorted(java.util.Comparator.comparing(SesionColaborativa::getCreadaEn).reversed())
+                .map(this::convertirAResponse).toList();
+    }
+
     @Transactional
     public SesionColaborativaResponse iniciarSesion(UUID proyectoId) {
 

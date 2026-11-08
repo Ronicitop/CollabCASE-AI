@@ -15,6 +15,11 @@ public class SesionColaborativaController {
 
     private final SesionColaborativaService sesionColaborativaService;
 
+    @GetMapping("/proyecto/{proyectoId}")
+    public java.util.List<SesionColaborativaResponse> listarPorProyecto(@PathVariable UUID proyectoId) {
+        return sesionColaborativaService.listarPorProyecto(proyectoId);
+    }
+
     @PostMapping("/proyecto/{proyectoId}")
     @ResponseStatus(HttpStatus.CREATED)
     public SesionColaborativaResponse iniciarSesion(

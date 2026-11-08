@@ -1,9 +1,8 @@
 package com.collabcase.colaboracion.controlador;
 
-import com.collabcase.colaboracion.dominio.MensajeSala;
+import com.collabcase.colaboracion.servicio.ChatProyectoService;
 import com.collabcase.colaboracion.dominio.SesionColaborativa;
 import com.collabcase.colaboracion.dto.MensajeSalaDTO;
-import com.collabcase.colaboracion.repositorio.MensajeSalaRepository;
 import com.collabcase.colaboracion.repositorio.SesionColaborativaRepository;
 import com.collabcase.ia.servicio.ServicioIaPar;
 import com.collabcase.modelado.dominio.AtributoDiagrama;
@@ -18,7 +17,6 @@ import com.collabcase.modelado.servicio.ModeloDiagramaService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,14 +25,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/sala")
 @CrossOrigin(origins = "*")
 public class SalaColaborativaController {
 
-    private final MensajeSalaRepository mensajeSalaRepository;
+    private final com.collabcase.notificacion.NotificacionesService notificaciones;
+    private final ChatProyectoService chat;
     private final SimpMessagingTemplate messagingTemplate;
     private final ServicioIaPar servicioIaPar;
     private final ModeloDiagramaService modeloDiagramaService;
@@ -43,7 +41,8 @@ public class SalaColaborativaController {
     private final AtributoDiagramaRepository atributoRepository;
     private final RelacionDiagramaRepository relacionRepository;
 
-    public SalaColaborativaController(MensajeSalaRepository mensajeSalaRepository,
+    public SalaColaborativaController(com.collabcase.notificacion.NotificacionesService notificaciones,
+                                      ChatProyectoService chat,
                                       SimpMessagingTemplate messagingTemplate,
                                       ServicioIaPar servicioIaPar,
                                       ModeloDiagramaService modeloDiagramaService,
@@ -51,7 +50,8 @@ public class SalaColaborativaController {
                                       ClaseDiagramaRepository claseRepository,
                                       AtributoDiagramaRepository atributoRepository,
                                       RelacionDiagramaRepository relacionRepository) {
-        this.mensajeSalaRepository = mensajeSalaRepository;
+        this.notificaciones = notificaciones;
+        this.chat = chat;
         this.messagingTemplate = messagingTemplate;
         this.servicioIaPar = servicioIaPar;
         this.modeloDiagramaService = modeloDiagramaService;
@@ -61,67 +61,37 @@ public class SalaColaborativaController {
         this.relacionRepository = relacionRepository;
     }
 
+    @GetMapping("/proyecto/{proyectoId}/mensajes")
+    public ResponseEntity<List<MensajeSalaDTO>> obtenerHistorialProyecto(@PathVariable UUID proyectoId) {
+        return ResponseEntity.ok(chat.historialProyecto(proyectoId));
+    }
+
     @GetMapping("/{sesionId}/mensajes")
     public ResponseEntity<List<MensajeSalaDTO>> obtenerHistorial(@PathVariable UUID sesionId) {
-        List<MensajeSalaDTO> historial = mensajeSalaRepository.findBySesionIdOrderByFechaHoraAsc(sesionId)
-                .stream()
-                .map(m -> new MensajeSalaDTO(m.getId(), m.getSesionId(), m.getRemitenteNombre(), m.getTipoEmisor().name(), m.getContenido(), m.getFechaHora()))
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(historial);
+        return ResponseEntity.ok(chat.historialSesion(sesionId));
     }
 
     @MessageMapping("/sesion/{sesionId}/enviar-mensaje")
-    @SendTo("/topic/sesion/{sesionId}/mensajes")
-    public MensajeSalaDTO recibirYTransmitirMensaje(@DestinationVariable UUID sesionId, MensajeSalaDTO dto) {
-        return procesarMensajeEntrante(sesionId, dto);
+    public void recibirYTransmitirMensaje(@DestinationVariable UUID sesionId, MensajeSalaDTO dto) {
+        procesarMensajeEntrante(sesionId, dto);
     }
 
     @PostMapping("/{sesionId}/mensaje")
     public ResponseEntity<MensajeSalaDTO> recibirMensajeRest(@PathVariable UUID sesionId, @RequestBody MensajeSalaDTO dto) {
-        MensajeSalaDTO respuesta = procesarMensajeEntrante(sesionId, dto);
-        return ResponseEntity.ok(respuesta);
+        return ResponseEntity.ok(procesarMensajeEntrante(sesionId, dto));
     }
 
     private MensajeSalaDTO procesarMensajeEntrante(UUID sesionId, MensajeSalaDTO dto) {
-        MensajeSala.TipoEmisor emisor = MensajeSala.TipoEmisor.valueOf(dto.getTipoEmisor());
-        MensajeSala guardado = mensajeSalaRepository.save(new MensajeSala(
-                sesionId,
-                dto.getRemitenteNombre(),
-                emisor,
-                dto.getContenido()
-        ));
-        dto.setId(guardado.getId());
-        dto.setFechaHora(guardado.getFechaHora());
-
-        if (emisor == MensajeSala.TipoEmisor.USUARIO &&
-           (dto.getContenido().toLowerCase().contains("@ia") || dto.getContenido().toLowerCase().startsWith("ia:"))) {
-
+        MensajeSalaDTO guardado = chat.guardar(sesionId, dto);
+        if ("USUARIO".equals(guardado.getTipoEmisor()) &&
+                (guardado.getContenido().toLowerCase().contains("@ia") || guardado.getContenido().toLowerCase().startsWith("ia:"))) {
             new Thread(() -> {
-                String respuestaTexto = servicioIaPar.procesarConsultaEnSala(sesionId, dto.getRemitenteNombre(), dto.getContenido());
-
-                MensajeSala respuestaIa = mensajeSalaRepository.save(new MensajeSala(
-                        sesionId,
-                        "CollabCASE AI",
-                        MensajeSala.TipoEmisor.IA,
-                        respuestaTexto
-                ));
-
-                MensajeSalaDTO dtoIa = new MensajeSalaDTO(
-                        respuestaIa.getId(),
-                        respuestaIa.getSesionId(),
-                        respuestaIa.getRemitenteNombre(),
-                        respuestaIa.getTipoEmisor().name(),
-                        respuestaIa.getContenido(),
-                        respuestaIa.getFechaHora()
-                );
-                messagingTemplate.convertAndSend("/topic/sesion/" + sesionId + "/mensajes", dtoIa);
-
+                String respuestaTexto = servicioIaPar.procesarConsultaEnSala(sesionId, guardado.getRemitenteNombre(), guardado.getContenido());
+                chat.guardar(sesionId, new MensajeSalaDTO(null, sesionId, "CollabCASE AI", "IA", respuestaTexto, null));
                 aplicarOperacionesSiExisten(sesionId, respuestaTexto);
-
-            }).start();
+            }, "collabcase-chat-ia").start();
         }
-
-        return dto;
+        return guardado;
     }
 
     private void aplicarOperacionesSiExisten(UUID sesionId, String textoRespuesta) {
@@ -231,6 +201,7 @@ public class SalaColaborativaController {
 
             // 3. Emitir a los canales suscritos por App.tsx
             if (huboCambios) {
+                notificaciones.modelo(proyectoId);
                 ModeloCompletoResponse modeloActualizado = modeloDiagramaService.obtenerModeloCompleto(proyectoId);
                 messagingTemplate.convertAndSend("/topic/sesiones/" + sesion.getCodigo() + "/modelo", modeloActualizado);
                 messagingTemplate.convertAndSend("/topic/sesiones/" + sesion.getCodigo() + "/operaciones", "MODELO_ACTUALIZADO");

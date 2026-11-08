@@ -5,20 +5,27 @@ import com.collabcase.modelado.dominio.ModeloDiagrama;
 import com.collabcase.modelado.repositorio.ClaseDiagramaRepository;
 import com.collabcase.modelado.repositorio.ModeloDiagramaRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.collabcase.notificacion.NotificacionesService;
 
 import java.util.List;
 import java.util.UUID;
 
 @Service
+@Transactional
 public class ClaseDiagramaService {
+
+    private final NotificacionesService notificaciones;
 
     private final ClaseDiagramaRepository claseDiagramaRepository;
     private final ModeloDiagramaRepository modeloDiagramaRepository;
 
     public ClaseDiagramaService(
+            NotificacionesService notificaciones,
             ClaseDiagramaRepository claseDiagramaRepository,
             ModeloDiagramaRepository modeloDiagramaRepository) {
 
+        this.notificaciones = notificaciones;
         this.claseDiagramaRepository = claseDiagramaRepository;
         this.modeloDiagramaRepository = modeloDiagramaRepository;
     }
@@ -50,6 +57,7 @@ public class ClaseDiagramaService {
                 .posicionY(datosClase.getPosicionY())
                 .build();
 
+        notificaciones.modelo(clase.getModelo().getProyecto().getId());
         return claseDiagramaRepository.save(clase);
     }
 
@@ -85,15 +93,18 @@ public class ClaseDiagramaService {
             );
         }
 
+        boolean cambioContenido = !java.util.Objects.equals(clase.getNombre(), datosClase.getNombre());
         clase.setNombre(datosClase.getNombre());
         clase.setPosicionX(datosClase.getPosicionX());
         clase.setPosicionY(datosClase.getPosicionY());
 
+        if (cambioContenido) notificaciones.modelo(clase.getModelo().getProyecto().getId());
         return claseDiagramaRepository.save(clase);
     }
 
     public void eliminar(UUID id) {
         ClaseDiagrama clase = buscarPorId(id);
+        notificaciones.modelo(clase.getModelo().getProyecto().getId());
         claseDiagramaRepository.delete(clase);
     }
 }

@@ -5,20 +5,27 @@ import com.collabcase.modelado.dominio.ClaseDiagrama;
 import com.collabcase.modelado.repositorio.AtributoDiagramaRepository;
 import com.collabcase.modelado.repositorio.ClaseDiagramaRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.collabcase.notificacion.NotificacionesService;
 
 import java.util.List;
 import java.util.UUID;
 
 @Service
+@Transactional
 public class AtributoDiagramaService {
+
+    private final NotificacionesService notificaciones;
 
     private final AtributoDiagramaRepository atributoDiagramaRepository;
     private final ClaseDiagramaRepository claseDiagramaRepository;
 
     public AtributoDiagramaService(
+            NotificacionesService notificaciones,
             AtributoDiagramaRepository atributoDiagramaRepository,
             ClaseDiagramaRepository claseDiagramaRepository) {
 
+        this.notificaciones = notificaciones;
         this.atributoDiagramaRepository = atributoDiagramaRepository;
         this.claseDiagramaRepository = claseDiagramaRepository;
     }
@@ -52,6 +59,7 @@ public class AtributoDiagramaService {
                 .identificador(datosAtributo.getIdentificador())
                 .build();
 
+        notificaciones.modelo(atributo.getClase().getModelo().getProyecto().getId());
         return atributoDiagramaRepository.save(atributo);
     }
 
@@ -93,11 +101,13 @@ public class AtributoDiagramaService {
         atributo.setPermiteNulo(datosAtributo.getPermiteNulo());
         atributo.setIdentificador(datosAtributo.getIdentificador());
 
+        notificaciones.modelo(atributo.getClase().getModelo().getProyecto().getId());
         return atributoDiagramaRepository.save(atributo);
     }
 
     public void eliminar(UUID id) {
         AtributoDiagrama atributo = buscarPorId(id);
+        notificaciones.modelo(atributo.getClase().getModelo().getProyecto().getId());
         atributoDiagramaRepository.delete(atributo);
     }
 }

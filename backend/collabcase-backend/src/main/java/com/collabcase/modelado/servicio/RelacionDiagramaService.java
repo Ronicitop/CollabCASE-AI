@@ -7,22 +7,29 @@ import com.collabcase.modelado.repositorio.ClaseDiagramaRepository;
 import com.collabcase.modelado.repositorio.ModeloDiagramaRepository;
 import com.collabcase.modelado.repositorio.RelacionDiagramaRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.collabcase.notificacion.NotificacionesService;
 
 import java.util.List;
 import java.util.UUID;
 
 @Service
+@Transactional
 public class RelacionDiagramaService {
+
+    private final NotificacionesService notificaciones;
 
     private final RelacionDiagramaRepository relacionDiagramaRepository;
     private final ModeloDiagramaRepository modeloDiagramaRepository;
     private final ClaseDiagramaRepository claseDiagramaRepository;
 
     public RelacionDiagramaService(
+            NotificacionesService notificaciones,
             RelacionDiagramaRepository relacionDiagramaRepository,
             ModeloDiagramaRepository modeloDiagramaRepository,
             ClaseDiagramaRepository claseDiagramaRepository) {
 
+        this.notificaciones = notificaciones;
         this.relacionDiagramaRepository = relacionDiagramaRepository;
         this.modeloDiagramaRepository = modeloDiagramaRepository;
         this.claseDiagramaRepository = claseDiagramaRepository;
@@ -73,6 +80,7 @@ public class RelacionDiagramaService {
                 .nombre(datosRelacion.getNombre())
                 .build();
 
+        notificaciones.modelo(relacion.getModelo().getProyecto().getId());
         return relacionDiagramaRepository.save(relacion);
     }
 
@@ -104,11 +112,13 @@ public class RelacionDiagramaService {
         );
         relacion.setNombre(datosRelacion.getNombre());
 
+        notificaciones.modelo(relacion.getModelo().getProyecto().getId());
         return relacionDiagramaRepository.save(relacion);
     }
 
     public void eliminar(UUID id) {
         RelacionDiagrama relacion = buscarPorId(id);
+        notificaciones.modelo(relacion.getModelo().getProyecto().getId());
         relacionDiagramaRepository.delete(relacion);
     }
 }

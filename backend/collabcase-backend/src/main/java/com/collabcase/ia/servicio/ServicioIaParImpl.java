@@ -1,9 +1,9 @@
 package com.collabcase.ia.servicio;
 
 import com.collabcase.colaboracion.dominio.AuditoriaOperacion;
-import com.collabcase.colaboracion.dominio.MensajeSala;
+import com.collabcase.colaboracion.dto.MensajeSalaDTO;
 import com.collabcase.colaboracion.repositorio.AuditoriaOperacionRepository;
-import com.collabcase.colaboracion.repositorio.MensajeSalaRepository;
+import com.collabcase.colaboracion.servicio.ChatProyectoService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -37,20 +37,20 @@ public class ServicioIaParImpl implements ServicioIaPar {
     @Value("${ia.local.ollama.model:llama3.2:1b}")
     private String ollamaModel;
 
-    private final MensajeSalaRepository mensajeSalaRepository;
+    private final ChatProyectoService chat;
     private final AuditoriaOperacionRepository auditoriaRepository;
     private final RestTemplate restTemplate;
 
-    public ServicioIaParImpl(MensajeSalaRepository mensajeSalaRepository,
+    public ServicioIaParImpl(ChatProyectoService chat,
                              AuditoriaOperacionRepository auditoriaRepository) {
-        this.mensajeSalaRepository = mensajeSalaRepository;
+        this.chat = chat;
         this.auditoriaRepository = auditoriaRepository;
         this.restTemplate = new RestTemplate();
     }
 
     @Override
     public String procesarConsultaEnSala(UUID sesionId, String remitenteNombre, String consulta) {
-        List<MensajeSala> mensajesPrevios = mensajeSalaRepository.findBySesionIdOrderByFechaHoraAsc(sesionId);
+        List<MensajeSalaDTO> mensajesPrevios = chat.historialSesion(sesionId);
         List<AuditoriaOperacion> ultimosCambios = auditoriaRepository.findTop15BySesionIdOrderByFechaHoraDesc(sesionId);
 
         String contextoHistorial = mensajesPrevios.stream()

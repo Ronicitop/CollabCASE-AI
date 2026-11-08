@@ -37,6 +37,7 @@ public class OperacionColaborativaService {
     private final ModeloDiagramaService modeloDiagramaService;
 
     private final TransactionTemplate transactionTemplate;
+    private final com.collabcase.notificacion.NotificacionesService notificaciones;
 
     public OperacionColaborativaResponse aplicarOperacion(
             String codigoSesion,
@@ -46,7 +47,7 @@ public class OperacionColaborativaService {
         SesionColaborativaResponse sesion =
                 sesionColaborativaService.unirseSesion(codigoSesion);
 
-        return switch (solicitud.tipo()) {
+        var respuesta = switch (solicitud.tipo()) {
             case MOVER_CLASE ->
                     moverClase(sesion, solicitud);
 
@@ -83,6 +84,10 @@ public class OperacionColaborativaService {
                                     + solicitud.tipo()
                     );
         };
+        if (solicitud.tipo() != com.collabcase.colaboracion.dto.TipoOperacionColaborativa.MOVER_CLASE) {
+            notificaciones.modelo(sesion.proyectoId());
+        }
+        return respuesta;
     }
 
     private OperacionColaborativaResponse moverClase(

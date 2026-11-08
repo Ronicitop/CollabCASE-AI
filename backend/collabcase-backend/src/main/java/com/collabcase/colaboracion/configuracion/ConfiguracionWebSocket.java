@@ -13,7 +13,7 @@ import java.util.Arrays;
 @EnableWebSocketMessageBroker
 public class ConfiguracionWebSocket implements WebSocketMessageBrokerConfigurer {
 
-    @Value("${CORS_ALLOWED_ORIGINS:http://localhost:5173}")
+    @Value("${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000,http://192.168.0.9:3000,http://192.168.0.9:5173}")
     private String corsAllowedOrigins;
 
     @Override
