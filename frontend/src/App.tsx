@@ -396,6 +396,8 @@ function RelacionUmlEdge({
   const esDiscontinua = tipo === 'REALIZACION' || tipo === 'DEPENDENCIA'
 
   const estiloRelacion = {
+    stroke: '#0f172a',
+    strokeWidth: 1.5,
     ...style,
     ...(esDiscontinua ? { strokeDasharray: '8 6' } : {}),
   }
@@ -414,19 +416,45 @@ function RelacionUmlEdge({
     y: centroBaseTriangulo.y - perpendicularDestino.y * 10,
   }
 
-  const diamanteA = { x: sourceX, y: sourceY }
-  const diamanteB = {
+  // Rombo en el Origen
+  const diamanteOrigenA = { x: sourceX, y: sourceY }
+  const diamanteOrigenB = {
     x: sourceX + salidaOrigen.x * 10 + perpendicularOrigen.x * 7,
     y: sourceY + salidaOrigen.y * 10 + perpendicularOrigen.y * 7,
   }
-  const diamanteC = {
+  const diamanteOrigenC = {
     x: sourceX + salidaOrigen.x * 20,
     y: sourceY + salidaOrigen.y * 20,
   }
-  const diamanteD = {
+  const diamanteOrigenD = {
     x: sourceX + salidaOrigen.x * 10 - perpendicularOrigen.x * 7,
     y: sourceY + salidaOrigen.y * 10 - perpendicularOrigen.y * 7,
   }
+
+  // Rombo en el Destino (cuando la relación fue guardada de la Parte hacia el Contenedor)
+  const diamanteDestinoA = { x: targetX, y: targetY }
+  const diamanteDestinoB = {
+    x: targetX - entradaDestino.x * 10 + perpendicularDestino.x * 7,
+    y: targetY - entradaDestino.y * 10 + perpendicularDestino.y * 7,
+  }
+  const diamanteDestinoC = {
+    x: targetX - entradaDestino.x * 20,
+    y: targetY - entradaDestino.y * 20,
+  }
+  const diamanteDestinoD = {
+    x: targetX - entradaDestino.x * 10 - perpendicularDestino.x * 7,
+    y: targetY - entradaDestino.y * 10 - perpendicularDestino.y * 7,
+  }
+
+  // Detecta si el rombo debe anclarse al destino según la multiplicidad del contenedor
+  const multOrigen = (datos?.multiplicidadOrigen ?? '').trim()
+  const multDestino = (datos?.multiplicidadDestino ?? '').trim()
+  const diamanteEnDestino =
+    multDestino === '1' && (multOrigen === '*' || multOrigen === '1..*' || multOrigen === '0..*')
+
+  const puntosDiamanteActual = diamanteEnDestino
+    ? [diamanteDestinoA, diamanteDestinoB, diamanteDestinoC, diamanteDestinoD]
+    : [diamanteOrigenA, diamanteOrigenB, diamanteOrigenC, diamanteOrigenD]
 
   const flechaAbiertaA = {
     x: targetX - entradaDestino.x * 14 + perpendicularDestino.x * 7,
@@ -437,8 +465,8 @@ function RelacionUmlEdge({
     y: targetY - entradaDestino.y * 14 - perpendicularDestino.y * 7,
   }
 
-  const distanciaDesdeClase = 22
-  const separacionDeLinea = 12
+  const distanciaDesdeClase = 26
+  const separacionDeLinea = 14
   const perpendicularEtiquetaDestino = {
     x: -exteriorDestino.y,
     y: exteriorDestino.x,
@@ -475,9 +503,9 @@ function RelacionUmlEdge({
             baseTrianguloA,
             baseTrianguloB,
           ])}
-          fill="white"
-          stroke="currentColor"
-          strokeWidth={1.5}
+          fill="#ffffff"
+          stroke="#0f172a"
+          strokeWidth={1.8}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
@@ -485,15 +513,10 @@ function RelacionUmlEdge({
 
       {(tipo === 'AGREGACION' || tipo === 'COMPOSICION') && (
         <polygon
-          points={puntosPoligono([
-            diamanteA,
-            diamanteB,
-            diamanteC,
-            diamanteD,
-          ])}
-          fill={tipo === 'COMPOSICION' ? 'currentColor' : 'white'}
-          stroke="currentColor"
-          strokeWidth={1.5}
+          points={puntosPoligono(puntosDiamanteActual)}
+          fill={tipo === 'COMPOSICION' ? '#0f172a' : '#ffffff'}
+          stroke="#0f172a"
+          strokeWidth={2}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
@@ -507,8 +530,8 @@ function RelacionUmlEdge({
             flechaAbiertaB,
           ])}
           fill="none"
-          stroke="currentColor"
-          strokeWidth={1.5}
+          stroke="#0f172a"
+          strokeWidth={1.8}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
@@ -520,6 +543,7 @@ function RelacionUmlEdge({
           path={rutaClaseAsociacion}
           style={{
             ...style,
+            stroke: '#0f172a',
             strokeDasharray: '8 6',
           }}
         />
